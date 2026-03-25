@@ -18,6 +18,11 @@ import * as queries from './queries';
 
 const BET_STAKE = 100;
 
+// Points scoring: exact=3, correct diff=2, correct winner=1
+const POINTS_EXACT = 3;
+const POINTS_DIFF = 2;
+const POINTS_WINNER = 1;
+
 // ─── Bet Placement ───
 
 export interface PlaceBetParams {
@@ -142,24 +147,51 @@ async function settleMarket(
     const pendingBets = await queries.findPendingBetsByMarket(market.id, trx);
 
     for (const bet of pendingBets) {
-      const outcome = winningOptionIds.has(bet.market_option_id) ? 'won' : 'lost';
-      await queries.updateBetStatus(bet.id, outcome, trx);
+      // Look up the group's scoring format
+      const group = await queries.findGroupById(bet.group_id);
+      const scoringFormat = group?.scoring_format || 'betting';
 
-      // Get the option's odds for payout calculation
-      const betOption = options.find((o) => o.id === bet.market_option_id);
-      const odds = betOption?.odds ?? 2.0; // default odds if not set
-      const payout = outcome === 'won' ? Math.floor(BET_STAKE * (odds || 2.0)) : 0;
+      if (scoringFormat === 'points') {
+        // Points format: calculate points from predicted vs actual score
+        const points = calculateScorePoints(
+          bet.predicted_home_score,
+          bet.predicted_away_score,
+          result.home_score,
+          result.away_score
+        );
+        const outcome = points > 0 ? 'won' : 'lost';
+        await queries.updateBetStatus(bet.id, outcome, trx);
 
-      const betSettledPayload: BetSettledPayload = {
-        bet_id: bet.id,
-        user_id: bet.user_id,
-        group_id: bet.group_id,
-        market_option_id: bet.market_option_id,
-        market_type: market.type,
-        outcome,
-        payout,
-      };
-      await publishEvent(EventNames.BET_SETTLED, betSettledPayload, correlationId);
+        const betSettledPayload: BetSettledPayload = {
+          bet_id: bet.id,
+          user_id: bet.user_id,
+          group_id: bet.group_id,
+          market_option_id: bet.market_option_id,
+          market_type: market.type,
+          outcome,
+          payout: points, // for points format, payout = points earned
+        };
+        await publishEvent(EventNames.BET_SETTLED, betSettledPayload, correlationId);
+      } else {
+        // Betting format: stake × odds
+        const outcome = winningOptionIds.has(bet.market_option_id) ? 'won' : 'lost';
+        await queries.updateBetStatus(bet.id, outcome, trx);
+
+        const betOption = options.find((o) => o.id === bet.market_option_id);
+        const odds = betOption?.odds ?? 2.0;
+        const payout = outcome === 'won' ? Math.floor(BET_STAKE * (odds || 2.0)) : 0;
+
+        const betSettledPayload: BetSettledPayload = {
+          bet_id: bet.id,
+          user_id: bet.user_id,
+          group_id: bet.group_id,
+          market_option_id: bet.market_option_id,
+          market_type: market.type,
+          outcome,
+          payout,
+        };
+        await publishEvent(EventNames.BET_SETTLED, betSettledPayload, correlationId);
+      }
     }
 
     const marketSettledPayload: MarketSettledPayload = {
@@ -171,6 +203,45 @@ async function settleMarket(
     };
     await publishEvent(EventNames.MARKET_SETTLED, marketSettledPayload, correlationId);
   });
+}
+
+/**
+ * Calculate points for a score prediction.
+ * - Exact score: 3 points
+ * - Correct goal difference: 2 points
+ * - Correct winner: 1 point
+ * - Wrong: 0 points
+ */
+function calculateScorePoints(
+  predictedHome: number | null,
+  predictedAway: number | null,
+  actualHome: number,
+  actualAway: number
+): number {
+  if (predictedHome == null || predictedAway == null) return 0;
+
+  // Exact score match
+  if (predictedHome === actualHome && predictedAway === actualAway) {
+    return POINTS_EXACT;
+  }
+
+  const predictedDiff = predictedHome - predictedAway;
+  const actualDiff = actualHome - actualAway;
+
+  // Correct goal difference
+  if (predictedDiff === actualDiff) {
+    return POINTS_DIFF;
+  }
+
+  // Correct winner (or both predicted draw and actual draw)
+  const predictedOutcome = predictedHome > predictedAway ? 'home' : predictedHome < predictedAway ? 'away' : 'draw';
+  const actualOutcome = actualHome > actualAway ? 'home' : actualHome < actualAway ? 'away' : 'draw';
+
+  if (predictedOutcome === actualOutcome) {
+    return POINTS_WINNER;
+  }
+
+  return 0;
 }
 
 function determineWinningOutcome(

@@ -142,6 +142,24 @@
   /* No group notice */
   .no-group-notice { background: #1e1f2a; border: 1px dashed #4f6fff; border-radius: 10px; padding: 20px; text-align: center; margin-bottom: 16px; }
   .no-group-notice p { font-size: 14px; color: #9ca3af; margin-bottom: 10px; }
+
+  /* Score prediction */
+  .score-predict { display: flex; align-items: center; gap: 8px; justify-content: center; margin: 10px 0; }
+  .score-predict input { width: 50px; text-align: center; padding: 8px; font-size: 18px; font-weight: 700; border-radius: 8px; }
+  .score-predict .dash { color: #6b7280; font-size: 20px; font-weight: 700; }
+
+  /* Admin table */
+  .admin-table { width: 100%; font-size: 13px; border-collapse: collapse; }
+  .admin-table th { text-align: left; color: #6b7280; padding: 6px 8px; border-bottom: 1px solid #2a2b35; font-weight: 600; }
+  .admin-table td { padding: 6px 8px; border-bottom: 1px solid #1a1b23; }
+  .admin-table tr:hover td { background: #252636; }
+
+  /* Admin badge */
+  .badge-admin { background: #dc2626; color: #fff; }
+
+  /* Profile avatar */
+  .avatar-preview { width: 64px; height: 64px; border-radius: 50%; background: #252636; display: flex; align-items: center; justify-content: center; font-size: 28px; margin: 0 auto 12px; overflow: hidden; }
+  .avatar-preview img { width: 100%; height: 100%; object-fit: cover; }
 </style>
 </head>
 <body>
@@ -279,6 +297,74 @@
 
       <div class="log" id="activity-log"></div>
     </div>
+
+    <!-- ADMIN SCREEN -->
+    <div id="screen-admin" class="hidden">
+      <div class="section-title">Admin Panel</div>
+
+      <!-- Admin: Competitions -->
+      <div class="card">
+        <div class="card-title">Competitions</div>
+        <div id="admin-competitions-list"></div>
+        <div style="margin-top:10px;">
+          <div class="form-group"><input id="admin-comp-name" placeholder="Competition name (e.g. Premier League 25/26)" /></div>
+          <div style="display:flex;gap:8px;">
+            <div class="form-group" style="flex:1"><input id="admin-comp-sport" placeholder="Sport" value="football" /></div>
+            <div class="form-group" style="flex:1">
+              <select id="admin-comp-type"><option value="league">League</option><option value="cup">Cup</option></select>
+            </div>
+          </div>
+          <button class="btn btn-success btn-sm" id="btn-admin-add-comp">Add Competition</button>
+        </div>
+      </div>
+
+      <!-- Admin: Matches -->
+      <div class="card">
+        <div class="card-title">Matches</div>
+        <div class="form-group">
+          <label>Competition</label>
+          <select id="admin-match-comp"></select>
+        </div>
+        <div id="admin-matches-list"></div>
+        <div style="margin-top:10px;">
+          <div style="display:flex;gap:8px;">
+            <div class="form-group" style="flex:1"><input id="admin-match-home" placeholder="Home team" /></div>
+            <div class="form-group" style="flex:1"><input id="admin-match-away" placeholder="Away team" /></div>
+          </div>
+          <div class="form-group"><input id="admin-match-kickoff" type="datetime-local" /></div>
+          <button class="btn btn-success btn-sm" id="btn-admin-add-match">Add Match</button>
+        </div>
+      </div>
+
+      <!-- Admin: Users -->
+      <div class="card">
+        <div class="card-title">Users</div>
+        <div id="admin-users-list"></div>
+      </div>
+    </div>
+
+    <!-- PROFILE SCREEN -->
+    <div id="screen-profile" class="hidden">
+      <div class="section-title">My Profile</div>
+      <div class="card" style="text-align:center;">
+        <div class="avatar-preview" id="profile-avatar">?</div>
+        <div style="font-size:18px;font-weight:700;" id="profile-username"></div>
+        <div style="font-size:12px;color:#6b7280;" id="profile-email"></div>
+        <div style="font-size:11px;color:#6b7280;margin-top:4px;" id="profile-role"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">Edit Profile</div>
+        <div class="form-group">
+          <label>Avatar URL</label>
+          <input id="profile-avatar-url" placeholder="https://example.com/avatar.jpg" />
+        </div>
+        <div class="form-group">
+          <label>Username</label>
+          <input id="profile-new-username" placeholder="New username" />
+        </div>
+        <button class="btn btn-primary btn-block" id="btn-update-profile">Save Changes</button>
+      </div>
+    </div>
   </div>
 
   <!-- Bottom navigation (visible after login) -->
@@ -288,6 +374,8 @@
     <button class="nav-item" data-screen="leaderboard"><span class="nav-icon">&#127942;</span>Board</button>
     <button class="nav-item" data-screen="wallet"><span class="nav-icon">&#128176;</span>Wallet</button>
     <button class="nav-item" data-screen="group"><span class="nav-icon">&#9881;</span>Groups</button>
+    <button class="nav-item hidden" data-screen="admin" id="nav-admin"><span class="nav-icon">&#128736;</span>Admin</button>
+    <button class="nav-item" data-screen="profile"><span class="nav-icon">&#128100;</span>Me</button>
   </div>
 </div>
 
@@ -303,6 +391,7 @@ var state = {
   token: null,
   userId: null,
   username: null,
+  userRole: 'user',    // 'user' or 'admin'
   groups: [],          // array of {id, name, scoring_format, role, member_count, status}
   activeGroupId: null, // currently selected group
   competitions: [],
@@ -392,7 +481,7 @@ async function checkConnection() {
 
 // --- Screen management ---
 function showScreen(name) {
-  var screens = ['auth', 'matches', 'bets', 'leaderboard', 'wallet', 'group'];
+  var screens = ['auth', 'matches', 'bets', 'leaderboard', 'wallet', 'group', 'admin', 'profile'];
   screens.forEach(function(s) {
     var el = document.getElementById('screen-' + s);
     if (el) el.classList.toggle('hidden', s !== name);
@@ -452,6 +541,17 @@ function doLogout() {
 async function onLogin() {
   document.getElementById('user-name').textContent = state.username;
   showScreen('matches');
+
+  // Fetch profile to get role
+  try {
+    var profile = await api('GET', '/v1/me');
+    state.userRole = profile.role || 'user';
+    // Show/hide admin tab
+    var adminNav = document.getElementById('nav-admin');
+    if (adminNav) adminNav.classList.toggle('hidden', state.userRole !== 'admin');
+  } catch (e) {
+    console.error('Profile fetch error:', e);
+  }
 
   await Promise.all([
     loadCompetitions(),
@@ -749,7 +849,9 @@ async function loadMatches() {
 
         if (!isFinished) {
           html += '<button class="btn btn-primary btn-sm" style="margin-top:4px;" data-action="bet" data-match="' + match.id + '">Bet</button>';
-          html += '<button class="btn btn-outline btn-sm" style="margin-top:4px;font-size:10px;" data-action="settle" data-match="' + match.id + '" data-home="' + match.home_team + '" data-away="' + match.away_team + '">Settle</button>';
+          if (state.userRole === 'admin') {
+            html += '<button class="btn btn-outline btn-sm" style="margin-top:4px;font-size:10px;" data-action="settle" data-match="' + match.id + '" data-home="' + match.home_team + '" data-away="' + match.away_team + '">Settle</button>';
+          }
         }
 
         html += '</div></div>';
@@ -782,30 +884,59 @@ async function toggleMarkets(matchId) {
     return;
   }
 
+  // Determine if we should show score prediction (points format)
+  var activeGroup = getActiveGroup();
+  var isPointsFormat = activeGroup && activeGroup.scoring_format === 'points';
+
   try {
     var data = await api('GET', '/v1/matches/' + matchId + '/markets');
     var html = '';
     for (var i = 0; i < data.markets.length; i++) {
       var market = data.markets[i];
       var typeLabel = market.type.replace(/_/g, ' ');
-      html += '<div class="card" style="margin: 8px 0;">'
-        + '<div class="card-title">' + typeLabel + ' <span class="badge badge-open">' + market.status + '</span></div>'
-        + '<div class="options">';
-      for (var j = 0; j < market.options.length; j++) {
-        var opt = market.options[j];
-        var oddsText = opt.odds ? Number(opt.odds).toFixed(1) : '-';
-        html += '<div class="option-btn" data-action="place-bet" data-option="' + opt.id + '" data-label="' + opt.label + '">'
-          + '<div class="option-label">' + opt.label + '</div>'
-          + '<div class="option-odds">' + oddsText + '</div>'
+
+      if (isPointsFormat && market.type === 'match_outcome') {
+        // Points format: show score prediction inputs
+        var firstOpt = market.options[0];
+        html += '<div class="card" style="margin: 8px 0;">'
+          + '<div class="card-title">Predict Score <span class="badge badge-open">3pts exact / 2pts diff / 1pt winner</span></div>'
+          + '<div class="score-predict">'
+          + '<input type="number" min="0" value="0" id="predict-home-' + matchId + '" class="score-input" />'
+          + '<span class="dash">-</span>'
+          + '<input type="number" min="0" value="0" id="predict-away-' + matchId + '" class="score-input" />'
+          + '</div>'
+          + '<button class="btn btn-primary btn-block btn-sm" data-action="place-score-bet" data-match="' + matchId + '" data-option="' + firstOpt.id + '">Submit Prediction</button>'
           + '</div>';
+      } else {
+        // Betting format: show outcome buttons with odds
+        html += '<div class="card" style="margin: 8px 0;">'
+          + '<div class="card-title">' + typeLabel + ' <span class="badge badge-open">' + market.status + '</span></div>'
+          + '<div class="options">';
+        for (var j = 0; j < market.options.length; j++) {
+          var opt = market.options[j];
+          var oddsText = opt.odds ? Number(opt.odds).toFixed(1) : '-';
+          html += '<div class="option-btn" data-action="place-bet" data-option="' + opt.id + '" data-label="' + opt.label + '">'
+            + '<div class="option-label">' + opt.label + '</div>'
+            + '<div class="option-odds">' + oddsText + '</div>'
+            + '</div>';
+        }
+        html += '</div></div>';
       }
-      html += '</div></div>';
     }
     container.innerHTML = html;
     container.classList.remove('hidden');
 
     container.querySelectorAll('[data-action="place-bet"]').forEach(function(btn) {
       btn.addEventListener('click', function() { placeBet(this.dataset.option, this.dataset.label, this); });
+    });
+    container.querySelectorAll('[data-action="place-score-bet"]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var mid = this.dataset.match;
+        var optId = this.dataset.option;
+        var homeScore = parseInt(document.getElementById('predict-home-' + mid).value) || 0;
+        var awayScore = parseInt(document.getElementById('predict-away-' + mid).value) || 0;
+        placeScoreBet(optId, homeScore, awayScore, this);
+      });
     });
   } catch (e) {
     alert('Markets error: ' + e.message);
@@ -828,6 +959,27 @@ async function placeBet(optionId, label, el) {
     log('Bet placed: ' + label, 'success');
 
     await Promise.all([loadWallet(), loadBets(), loadLeaderboard()]);
+  } catch (e) {
+    alert('Bet failed: ' + e.message);
+  }
+}
+
+async function placeScoreBet(optionId, homeScore, awayScore, el) {
+  if (!state.activeGroupId) {
+    alert('Select a group first!');
+    return;
+  }
+  try {
+    await api('POST', '/v1/bets', {
+      group_id: state.activeGroupId,
+      market_option_id: optionId,
+      predicted_home_score: homeScore,
+      predicted_away_score: awayScore,
+    });
+    el.textContent = 'Submitted!';
+    el.disabled = true;
+    log('Score prediction placed: ' + homeScore + '-' + awayScore, 'success');
+    await Promise.all([loadBets(), loadLeaderboard()]);
   } catch (e) {
     alert('Bet failed: ' + e.message);
   }
@@ -936,13 +1088,22 @@ async function loadLeaderboard() {
       var isMe = entry.user.id === state.userId;
       var highlight = isMe ? 'lb-highlight' : '';
       var rankDisplay = entry.rank || '-';
-      var winRate = entry.total_bets > 0 ? Math.round(entry.win_rate * 100) + '%' : '-';
+      var activeGrp = getActiveGroup();
+      var isPointsFmt = activeGrp && activeGrp.scoring_format === 'points';
+      var statsText;
+      if (isPointsFmt) {
+        statsText = entry.points + 'pts | ' + entry.wins + 'W ' + entry.losses + 'L';
+      } else {
+        var winRate = entry.total_bets > 0 ? Math.round(entry.win_rate * 100) + '%' : '-';
+        statsText = entry.wins + 'W ' + entry.losses + 'L | ' + winRate;
+      }
       var streak = entry.current_streak > 0 ? ' | streak: ' + entry.current_streak : '';
+      statsText += streak;
 
       html += '<div class="lb-row ' + highlight + '">'
         + '<div class="lb-rank ' + rankCls + '">' + rankDisplay + '</div>'
         + '<div class="lb-name">' + entry.user.username + (isMe ? ' (you)' : '') + '</div>'
-        + '<div class="lb-stats">' + entry.wins + 'W ' + entry.losses + 'L | ' + winRate + streak + '</div>'
+        + '<div class="lb-stats">' + statsText + '</div>'
         + '</div>';
     }
     container.innerHTML = html;
@@ -1002,6 +1163,192 @@ async function joinGroup() {
   }
 }
 
+// --- Admin functions ---
+async function loadAdminCompetitions() {
+  try {
+    var data = await api('GET', '/v1/admin/competitions');
+    var container = document.getElementById('admin-competitions-list');
+    if (!data.competitions.length) {
+      container.innerHTML = '<div class="empty">No competitions</div>';
+    } else {
+      var html = '<table class="admin-table"><tr><th>Name</th><th>Sport</th><th>Type</th><th></th></tr>';
+      for (var i = 0; i < data.competitions.length; i++) {
+        var c = data.competitions[i];
+        html += '<tr><td>' + c.name + '</td><td>' + c.sport + '</td><td>' + c.type + '</td>'
+          + '<td><button class="btn btn-danger btn-sm" data-action="del-comp" data-id="' + c.id + '">Del</button></td></tr>';
+      }
+      html += '</table>';
+      container.innerHTML = html;
+      container.querySelectorAll('[data-action="del-comp"]').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          if (confirm('Delete this competition?')) {
+            await api('DELETE', '/v1/admin/competitions/' + this.dataset.id);
+            loadAdminCompetitions();
+          }
+        });
+      });
+    }
+    // Also populate match competition dropdown
+    var select = document.getElementById('admin-match-comp');
+    select.innerHTML = data.competitions.map(function(c) {
+      return '<option value="' + c.id + '">' + c.name + '</option>';
+    }).join('');
+    if (select.value) loadAdminMatches(select.value);
+  } catch (e) {
+    console.error('Admin competitions error:', e);
+  }
+}
+
+async function loadAdminMatches(compId) {
+  if (!compId) return;
+  try {
+    var data = await api('GET', '/v1/admin/matches?competition_id=' + compId);
+    var container = document.getElementById('admin-matches-list');
+    if (!data.matches.length) {
+      container.innerHTML = '<div class="empty">No matches</div>';
+    } else {
+      var html = '<table class="admin-table"><tr><th>Match</th><th>Status</th><th>Kickoff</th><th></th></tr>';
+      for (var i = 0; i < data.matches.length; i++) {
+        var m = data.matches[i];
+        var ko = new Date(m.kickoff_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        var actions = m.status !== 'finished'
+          ? '<button class="btn btn-danger btn-sm" data-action="settle-admin" data-id="' + m.id + '" data-home="' + m.home_team + '" data-away="' + m.away_team + '">Settle</button>'
+          : '<span class="badge badge-lost">done</span>';
+        html += '<tr><td>' + m.home_team + ' vs ' + m.away_team + '</td><td>' + m.status + '</td><td>' + ko + '</td><td>' + actions + '</td></tr>';
+      }
+      html += '</table>';
+      container.innerHTML = html;
+      container.querySelectorAll('[data-action="settle-admin"]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var mid = this.dataset.id;
+          var hs = prompt(this.dataset.home + ' score:', '0');
+          var as = prompt(this.dataset.away + ' score:', '0');
+          if (hs !== null && as !== null) {
+            doAdminSettle(mid, parseInt(hs) || 0, parseInt(as) || 0);
+          }
+        });
+      });
+    }
+  } catch (e) {
+    console.error('Admin matches error:', e);
+  }
+}
+
+async function doAdminSettle(matchId, homeScore, awayScore) {
+  try {
+    var data = await api('POST', '/v1/admin/matches/' + matchId + '/finish', {
+      home_score: homeScore,
+      away_score: awayScore,
+    });
+    alert(data.home_team + ' ' + homeScore + '-' + awayScore + ' ' + data.away_team + ': ' + data.outcome);
+    var compId = document.getElementById('admin-match-comp').value;
+    if (compId) loadAdminMatches(compId);
+  } catch (e) {
+    alert('Settle error: ' + e.message);
+  }
+}
+
+async function adminAddCompetition() {
+  var name = document.getElementById('admin-comp-name').value.trim();
+  var sport = document.getElementById('admin-comp-sport').value.trim();
+  var type = document.getElementById('admin-comp-type').value;
+  if (!name) return alert('Enter competition name');
+  try {
+    await api('POST', '/v1/admin/competitions', { name: name, sport: sport || 'football', type: type || 'league' });
+    document.getElementById('admin-comp-name').value = '';
+    await Promise.all([loadAdminCompetitions(), loadCompetitions()]);
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function adminAddMatch() {
+  var compId = document.getElementById('admin-match-comp').value;
+  var home = document.getElementById('admin-match-home').value.trim();
+  var away = document.getElementById('admin-match-away').value.trim();
+  var kickoff = document.getElementById('admin-match-kickoff').value;
+  if (!compId || !home || !away || !kickoff) return alert('Fill in all match fields');
+  try {
+    await api('POST', '/v1/admin/matches', {
+      competition_id: compId,
+      home_team: home,
+      away_team: away,
+      kickoff_at: new Date(kickoff).toISOString(),
+    });
+    document.getElementById('admin-match-home').value = '';
+    document.getElementById('admin-match-away').value = '';
+    loadAdminMatches(compId);
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+async function loadAdminUsers() {
+  try {
+    var data = await api('GET', '/v1/admin/users');
+    var container = document.getElementById('admin-users-list');
+    var html = '<table class="admin-table"><tr><th>Username</th><th>Email</th><th>Role</th><th></th></tr>';
+    for (var i = 0; i < data.users.length; i++) {
+      var u = data.users[i];
+      var roleBadge = u.role === 'admin' ? '<span class="badge badge-admin">admin</span>' : u.role;
+      var toggleBtn = u.id !== state.userId
+        ? '<button class="btn btn-outline btn-sm" data-action="toggle-role" data-id="' + u.id + '" data-role="' + u.role + '">'
+          + (u.role === 'admin' ? 'Demote' : 'Promote') + '</button>'
+        : '';
+      html += '<tr><td>' + u.username + '</td><td style="font-size:11px;">' + u.email + '</td><td>' + roleBadge + '</td><td>' + toggleBtn + '</td></tr>';
+    }
+    html += '</table>';
+    container.innerHTML = html;
+    container.querySelectorAll('[data-action="toggle-role"]').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        var newRole = this.dataset.role === 'admin' ? 'user' : 'admin';
+        await api('PUT', '/v1/admin/users/' + this.dataset.id + '/role', { role: newRole });
+        loadAdminUsers();
+      });
+    });
+  } catch (e) {
+    console.error('Admin users error:', e);
+  }
+}
+
+// --- Profile functions ---
+async function loadProfile() {
+  try {
+    var data = await api('GET', '/v1/me');
+    document.getElementById('profile-username').textContent = data.username;
+    document.getElementById('profile-email').textContent = data.email;
+    document.getElementById('profile-role').textContent = 'Role: ' + data.role;
+    document.getElementById('profile-new-username').value = data.username;
+    document.getElementById('profile-avatar-url').value = data.avatar_url || '';
+    var avatarEl = document.getElementById('profile-avatar');
+    if (data.avatar_url) {
+      avatarEl.innerHTML = '<img src="' + data.avatar_url + '" alt="avatar" />';
+    } else {
+      avatarEl.textContent = data.username.charAt(0).toUpperCase();
+    }
+  } catch (e) {
+    console.error('Profile error:', e);
+  }
+}
+
+async function updateProfile() {
+  var avatarUrl = document.getElementById('profile-avatar-url').value.trim();
+  var username = document.getElementById('profile-new-username').value.trim();
+  var body = {};
+  if (avatarUrl) body.avatar_url = avatarUrl;
+  if (username) body.username = username;
+  try {
+    var data = await api('PUT', '/v1/me', body);
+    state.username = data.username;
+    document.getElementById('user-name').textContent = data.username;
+    saveSession();
+    loadProfile();
+    alert('Profile updated!');
+  } catch (e) {
+    alert('Update error: ' + e.message);
+  }
+}
+
 // --- Group selector change ---
 document.getElementById('group-select').addEventListener('change', function() {
   var val = this.value;
@@ -1027,6 +1374,8 @@ document.querySelectorAll('.nav-item').forEach(function(btn) {
     if (screen === 'leaderboard') loadLeaderboard();
     if (screen === 'matches') loadMatches();
     if (screen === 'group') { loadMyGroups(); loadGroupDetails(); }
+    if (screen === 'admin') { loadAdminCompetitions(); loadAdminUsers(); }
+    if (screen === 'profile') loadProfile();
   });
 });
 
@@ -1036,6 +1385,12 @@ document.getElementById('btn-logout').addEventListener('click', doLogout);
 document.getElementById('btn-create-group').addEventListener('click', createGroup);
 document.getElementById('btn-join-group').addEventListener('click', joinGroup);
 document.getElementById('btn-add-comp').addEventListener('click', addCompetition);
+document.getElementById('btn-admin-add-comp').addEventListener('click', adminAddCompetition);
+document.getElementById('btn-admin-add-match').addEventListener('click', adminAddMatch);
+document.getElementById('btn-update-profile').addEventListener('click', updateProfile);
+document.getElementById('admin-match-comp').addEventListener('change', function() {
+  loadAdminMatches(this.value);
+});
 
 // --- Init ---
 checkConnection();

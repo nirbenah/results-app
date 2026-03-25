@@ -65,6 +65,13 @@ export async function login(email: string, password: string): Promise<AuthResult
     throw new UnauthorizedError('Invalid email or password');
   }
 
+  // Auto-promote to admin if email matches ADMIN_EMAIL env var
+  const adminEmail = process.env.ADMIN_EMAIL;
+  if (adminEmail && email === adminEmail && user.role !== 'admin') {
+    await db('users').where('id', user.id).update({ role: 'admin' });
+    console.log(`[Auth] Auto-promoted ${email} to admin role`);
+  }
+
   return {
     token: signToken(user.id),
     user: { id: user.id, username: user.username },

@@ -35,6 +35,7 @@ export function registerSubscribers(): void {
         payload.group_id,
         payload.user_id,
         won,
+        payload.payout,
         envelope.correlation_id
       );
     }

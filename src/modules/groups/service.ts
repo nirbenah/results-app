@@ -297,6 +297,7 @@ export async function handleBetSettled(
   groupId: string,
   userId: string,
   won: boolean,
+  payout: number,
   correlationId?: string
 ): Promise<void> {
   const trx = await getDb().transaction();
@@ -310,9 +311,17 @@ export async function handleBetSettled(
     // Apply settlement
     await queries.applyBetSettlement(groupId, userId, won, trx);
 
-    // Re-rank
+    // Fetch group for scoring format
     const group = await trx('groups').where('id', groupId).first();
-    await queries.reRankLeaderboard(groupId, group?.scoring_format || 'betting', trx);
+    const scoringFormat = group?.scoring_format || 'betting';
+
+    // For points-format groups, add points from the payout field
+    if (scoringFormat === 'points' && payout > 0) {
+      await queries.addPoints(groupId, userId, payout, trx);
+    }
+
+    // Re-rank
+    await queries.reRankLeaderboard(groupId, scoringFormat as 'points' | 'betting', trx);
 
     await trx.commit();
 

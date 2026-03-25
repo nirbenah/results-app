@@ -18,6 +18,7 @@ import { router as groupsRouter, register as registerGroups } from './modules/gr
 import { router as betsRouter, register as registerBets } from './modules/bets';
 import { router as walletRouter, registerSubscribers as registerWallet } from './modules/wallet';
 import { register as registerNotify } from './modules/notify';
+import { adminRouter } from './modules/admin';
 
 const app = express();
 
@@ -57,6 +58,7 @@ app.use('/v1', authRouter);
 app.use('/v1/groups', groupsRouter);
 app.use('/v1', betsRouter);
 app.use('/v1', walletRouter);
+app.use('/v1/admin', adminRouter);
 
 // ─── Error handler (must be last) ───
 app.use(errorHandler);

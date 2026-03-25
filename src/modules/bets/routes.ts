@@ -158,59 +158,6 @@ router.get('/bets', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
-// ─── POST /v1/admin/matches/:matchId/finish — Settle a match ───
-
-router.post(
-  '/admin/matches/:matchId/finish',
-  async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const matchId = req.params.matchId as string;
-      const { home_score, away_score } = req.body;
-
-      if (home_score == null || away_score == null) {
-        throw new BadRequestError('VALIDATION', 'home_score and away_score are required');
-      }
-
-      const db = (await import('../../shared/db')).getDb();
-
-      const match = await db('matches').where({ id: matchId }).first();
-      if (!match) {
-        throw new BadRequestError('NOT_FOUND', 'Match not found');
-      }
-
-      const outcome: 'home' | 'draw' | 'away' =
-        home_score > away_score ? 'home' : home_score < away_score ? 'away' : 'draw';
-
-      await db('matches').where({ id: matchId }).update({
-        status: 'finished',
-        result: JSON.stringify({ home_score, away_score, outcome }),
-      });
-
-      const { publishEvent } = await import('../../shared/events/publish');
-      const { EventNames } = await import('../../shared/events/types');
-
-      await publishEvent(EventNames.MATCH_FINISHED, {
-        match_id: matchId,
-        competition_id: match.competition_id,
-        result: { home_score, away_score, outcome },
-        events: [],
-      }, req.correlationId);
-
-      res.json({
-        match_id: matchId,
-        home_team: match.home_team,
-        away_team: match.away_team,
-        home_score,
-        away_score,
-        outcome,
-        message: 'Match settled. All bets resolved.',
-      });
-    } catch (err) {
-      next(err);
-    }
-  }
-);
-
 // ─── Helpers ───
 
 function formatMarket(m: queries.MarketWithOptions) {
