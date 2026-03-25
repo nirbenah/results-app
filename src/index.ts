@@ -1,3 +1,4 @@
+import path from 'path';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -31,6 +32,11 @@ app.use(rateLimiter);
 // ─── Health check (before auth — no token needed) ───
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// ─── Serve UI (before auth — no token needed) ───
+app.get('/ui', (_req, res) => {
+  res.sendFile(path.resolve(__dirname, '..', 'ui.html'));
 });
 
 // ─── Auth middleware (everything below requires a token) ───

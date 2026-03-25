@@ -218,7 +218,10 @@
 </div>
 
 <script>
-const API = 'http://localhost:3000';
+// Auto-detect: if opened from file:// or localhost, use local Docker. Otherwise use Railway.
+const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:')
+  ? 'http://localhost:3000'
+  : 'https://results-app-production-4e7e.up.railway.app';
 const state = {
   1: { token: null, userId: null, username: null },
   2: { token: null, userId: null, username: null },

@@ -7,7 +7,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 
 # Copy source
-COPY tsconfig.json knexfile.ts docker-entrypoint.sh ./
+COPY tsconfig.json knexfile.ts docker-entrypoint.sh ui.html ./
 COPY src/ ./src/
 
 # Build TypeScript
