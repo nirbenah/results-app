@@ -2,22 +2,47 @@
  * Wallet event subscribers.
  *
  * Reacts to domain events and creates wallet transactions.
- * All handlers are idempotent — they check reference_id
- * before inserting to guard against duplicate processing.
  */
 
 import { getEventBus } from '../../shared/events';
-import { EventEnvelope, EventNames, BetPlacedPayload, BetSettledPayload, SeasonFinishedPayload } from '../../shared/events/types';
+import {
+  EventEnvelope,
+  EventNames,
+  BetPlacedPayload,
+  BetSettledPayload,
+  MemberJoinedPayload,
+} from '../../shared/events/types';
 import * as walletService from './service';
-
-const DEFAULT_ENTRY_FEE = 100;
-const DEFAULT_WIN_CREDIT = 200;
 
 export function registerSubscribers(): void {
   const bus = getEventBus();
 
   /**
-   * bet.placed — debit entry fee from the user's wallet.
+   * member.joined — credit initial balance (1000 credits) for betting-format groups.
+   */
+  bus.subscribe(
+    EventNames.MEMBER_JOINED,
+    async (envelope: EventEnvelope) => {
+      const payload = envelope.payload as MemberJoinedPayload;
+
+      if (payload.scoring_format !== 'betting') {
+        return;
+      }
+
+      try {
+        await walletService.creditInitialBalance(payload.user_id, payload.group_id);
+        console.log(`[Wallet] Credited initial balance for user ${payload.user_id} in group ${payload.group_id}`);
+      } catch (err) {
+        console.error(
+          `[Wallet] Failed to credit initial balance for user ${payload.user_id}:`,
+          err
+        );
+      }
+    }
+  );
+
+  /**
+   * bet.placed — debit entry fee and credit participation bonus.
    */
   bus.subscribe(
     EventNames.BET_PLACED,
@@ -27,8 +52,8 @@ export function registerSubscribers(): void {
       try {
         await walletService.debitEntryFee(
           payload.user_id,
-          payload.season_id,
-          DEFAULT_ENTRY_FEE
+          payload.group_id,
+          payload.bet_id
         );
       } catch (err) {
         console.error(
@@ -36,11 +61,24 @@ export function registerSubscribers(): void {
           err
         );
       }
+
+      try {
+        await walletService.creditParticipationBonus(
+          payload.user_id,
+          payload.group_id,
+          payload.bet_id
+        );
+      } catch (err) {
+        console.error(
+          `[Wallet] Failed to credit participation bonus for bet ${payload.bet_id}:`,
+          err
+        );
+      }
     }
   );
 
   /**
-   * bet.settled with outcome='won' — credit the user's wallet.
+   * bet.settled with outcome='won' — credit the user's wallet with payout (stake × odds).
    */
   bus.subscribe(
     EventNames.BET_SETTLED,
@@ -54,37 +92,13 @@ export function registerSubscribers(): void {
       try {
         await walletService.creditWin(
           payload.user_id,
-          payload.season_id,
+          payload.group_id,
           payload.bet_id,
-          DEFAULT_WIN_CREDIT
+          payload.payout
         );
       } catch (err) {
         console.error(
           `[Wallet] Failed to credit win for bet ${payload.bet_id}:`,
-          err
-        );
-      }
-    }
-  );
-
-  /**
-   * season.finished — distribute payouts to top 3 ranked users.
-   */
-  bus.subscribe(
-    EventNames.SEASON_FINISHED,
-    async (envelope: EventEnvelope) => {
-      const payload = envelope.payload as SeasonFinishedPayload;
-
-      const rankings = payload.final_standings.map((entry) => ({
-        rank: entry.rank,
-        user_id: entry.user_id,
-      }));
-
-      try {
-        await walletService.distributePayout(payload.season_id, rankings);
-      } catch (err) {
-        console.error(
-          `[Wallet] Failed to distribute payouts for season ${payload.season_id}:`,
           err
         );
       }

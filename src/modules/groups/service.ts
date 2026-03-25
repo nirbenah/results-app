@@ -3,7 +3,7 @@ import { publishEvent } from '../../shared/events/publish';
 import {
   EventNames,
   StandingsUpdatedPayload,
-  SeasonFinishedPayload,
+  MemberJoinedPayload,
 } from '../../shared/events/types';
 import {
   NotFoundError,
@@ -17,21 +17,64 @@ import * as queries from './queries';
 
 export async function createGroup(
   userId: string,
-  name: string,
+  data: {
+    name: string;
+    scoring_format?: string;
+    allowed_bet_types?: string[];
+    competition_ids?: string[];
+  },
   correlationId?: string
 ) {
   const trx = await getDb().transaction();
   try {
     const group = await queries.insertGroup(
-      { name, commissioner_id: userId },
+      {
+        name: data.name,
+        commissioner_id: userId,
+        scoring_format: data.scoring_format || 'betting',
+        allowed_bet_types: data.allowed_bet_types || ['match_outcome'],
+      },
       trx
     );
+
+    // Commissioner is a member
     await queries.insertGroupMember(
       { group_id: group.id, user_id: userId, role: 'commissioner' },
       trx
     );
+
+    // Create leaderboard entry for commissioner
+    await queries.insertLeaderboardEntries(
+      [{ group_id: group.id, user_id: userId }],
+      trx
+    );
+
+    // Link competitions
+    if (data.competition_ids && data.competition_ids.length > 0) {
+      for (const compId of data.competition_ids) {
+        await queries.insertGroupCompetition(
+          { group_id: group.id, competition_id: compId },
+          trx
+        );
+      }
+    }
+
     await trx.commit();
-    return { id: group.id, name: group.name, commissioner_id: group.commissioner_id };
+
+    // Publish member.joined so wallet can give initial balance
+    const memberPayload: MemberJoinedPayload = {
+      group_id: group.id,
+      user_id: userId,
+      scoring_format: group.scoring_format,
+    };
+    await publishEvent(EventNames.MEMBER_JOINED, memberPayload, correlationId);
+
+    return {
+      id: group.id,
+      name: group.name,
+      commissioner_id: group.commissioner_id,
+      scoring_format: group.scoring_format,
+    };
   } catch (err) {
     await trx.rollback();
     throw err;
@@ -43,32 +86,18 @@ export async function getGroup(groupId: string) {
   if (!group) throw new NotFoundError('Group');
 
   const memberCount = await queries.countGroupMembers(groupId);
-  const season = await queries.findSeasonByGroupId(groupId);
+  const competitions = await queries.findGroupCompetitions(groupId);
 
-  const result: Record<string, unknown> = {
+  return {
     id: group.id,
     name: group.name,
     commissioner_id: group.commissioner_id,
+    scoring_format: group.scoring_format,
+    allowed_bet_types: group.allowed_bet_types,
+    status: group.status,
     member_count: memberCount,
+    competitions: competitions.map((c) => ({ id: c.id, name: c.name })),
   };
-
-  if (season) {
-    // Fetch competition name
-    const competition = await getDb()('competitions')
-      .where('id', season.competition_id)
-      .select('name')
-      .first();
-
-    result.season = {
-      id: season.id,
-      status: season.status,
-      competition: { name: competition?.name ?? null },
-    };
-  } else {
-    result.season = null;
-  }
-
-  return result;
 }
 
 // ─── Members ───
@@ -100,21 +129,23 @@ export async function addMember(
     role: 'member',
   });
 
-  // If there's an active or upcoming season, create a leaderboard entry
-  const season = await queries.findSeasonByGroupId(groupId);
-  if (season && season.status !== 'finished') {
-    await queries.insertLeaderboardEntries([
-      { season_id: season.id, user_id: targetUserId },
-    ]);
-  }
+  // Create leaderboard entry
+  await queries.insertLeaderboardEntries([
+    { group_id: groupId, user_id: targetUserId },
+  ]);
+
+  // Publish member.joined so wallet can give initial balance
+  const group = await queries.findGroupById(groupId);
+  const payload: MemberJoinedPayload = {
+    group_id: groupId,
+    user_id: targetUserId,
+    scoring_format: group?.scoring_format || 'betting',
+  };
+  await publishEvent(EventNames.MEMBER_JOINED, payload, correlationId);
 
   return { group_id: member.group_id, user_id: member.user_id, role: member.role };
 }
 
-/**
- * Self-join: a user joins a group using the group invite code (group ID).
- * No commissioner approval needed.
- */
 export async function joinGroup(
   groupId: string,
   userId: string,
@@ -134,13 +165,18 @@ export async function joinGroup(
     role: 'member',
   });
 
-  // If there's an active or upcoming season, create a leaderboard entry
-  const season = await queries.findSeasonByGroupId(groupId);
-  if (season && season.status !== 'finished') {
-    await queries.insertLeaderboardEntries([
-      { season_id: season.id, user_id: userId },
-    ]);
-  }
+  // Create leaderboard entry
+  await queries.insertLeaderboardEntries([
+    { group_id: groupId, user_id: userId },
+  ]);
+
+  // Publish member.joined so wallet can give initial balance
+  const payload: MemberJoinedPayload = {
+    group_id: groupId,
+    user_id: userId,
+    scoring_format: group.scoring_format,
+  };
+  await publishEvent(EventNames.MEMBER_JOINED, payload, correlationId);
 
   return { group_id: member.group_id, user_id: member.user_id, role: member.role };
 }
@@ -166,117 +202,52 @@ export async function removeMember(
   await queries.deleteGroupMember(groupId, targetUserId);
 }
 
-// ─── Seasons ───
+// ─── Competitions ───
 
-export async function startSeason(
+export async function addCompetition(
   groupId: string,
   requesterId: string,
-  data: { competition_id: string; starts_at: string; ends_at: string },
+  competitionId: string,
   correlationId?: string
 ) {
   await assertCommissioner(groupId, requesterId);
 
-  const existingSeason = await queries.findSeasonByGroupId(groupId);
-  if (existingSeason) {
-    throw new ConflictError('SEASON_EXISTS', 'Group already has a season');
-  }
+  const row = await queries.insertGroupCompetition({
+    group_id: groupId,
+    competition_id: competitionId,
+  });
 
-  const trx = await getDb().transaction();
-  try {
-    const season = await queries.insertSeason(
-      {
-        group_id: groupId,
-        competition_id: data.competition_id,
-        status: 'upcoming',
-        starts_at: data.starts_at,
-        ends_at: data.ends_at,
-      },
-      trx
-    );
+  const competitions = await queries.findGroupCompetitions(groupId);
+  const added = competitions.find((c) => c.competition_id === competitionId);
 
-    const memberIds = await queries.listGroupMemberUserIds(groupId);
-    const entries = memberIds.map((user_id) => ({
-      season_id: season.id,
-      user_id,
-    }));
-
-    if (entries.length > 0) {
-      await queries.insertLeaderboardEntries(entries, trx);
-    }
-
-    await trx.commit();
-
-    return {
-      id: season.id,
-      group_id: season.group_id,
-      competition_id: season.competition_id,
-      status: season.status,
-    };
-  } catch (err) {
-    await trx.rollback();
-    throw err;
-  }
+  return {
+    group_id: groupId,
+    competition_id: competitionId,
+    competition_name: added?.name ?? null,
+  };
 }
 
-export async function updateSeasonStatus(
+export async function removeCompetition(
   groupId: string,
   requesterId: string,
-  newStatus: 'active' | 'finished',
+  competitionId: string,
   correlationId?: string
 ) {
   await assertCommissioner(groupId, requesterId);
-
-  const season = await queries.findSeasonByGroupId(groupId);
-  if (!season) throw new NotFoundError('Season');
-
-  // Validate status transitions
-  if (newStatus === 'active' && season.status !== 'upcoming') {
-    throw new BadRequestError(
-      'INVALID_TRANSITION',
-      'Can only activate an upcoming season'
-    );
-  }
-  if (newStatus === 'finished' && season.status !== 'active') {
-    throw new BadRequestError(
-      'INVALID_TRANSITION',
-      'Can only finish an active season'
-    );
-  }
-
-  const updated = await queries.updateSeasonStatus(season.id, newStatus);
-
-  if (newStatus === 'finished') {
-    const standings = await queries.getLeaderboardWithUsernames(season.id);
-
-    const payload: SeasonFinishedPayload = {
-      season_id: season.id,
-      group_id: groupId,
-      final_standings: standings.map((s) => ({
-        rank: s.rank,
-        user_id: s.user_id,
-        username: s.username,
-        win_rate: Number(s.win_rate),
-        best_streak: s.best_streak,
-      })),
-    };
-
-    await publishEvent(EventNames.SEASON_FINISHED, payload, correlationId);
-  }
-
-  return { id: updated.id, status: updated.status };
+  await queries.deleteGroupCompetition(groupId, competitionId);
 }
 
 // ─── Leaderboard ───
 
 export async function getLeaderboard(groupId: string) {
-  const season = await queries.findSeasonByGroupId(groupId);
-  if (!season) throw new NotFoundError('Season');
+  const group = await queries.findGroupById(groupId);
+  if (!group) throw new NotFoundError('Group');
 
-  const entries = await queries.getLeaderboard(season.id);
+  const entries = await queries.getLeaderboard(groupId);
 
   return {
-    season_id: season.id,
-    updated_at: entries.length > 0 ? entries[0].updated_at : null,
+    group_id: groupId,
+    scoring_format: group.scoring_format,
     entries: entries.map((e) => ({
       rank: e.rank,
       user: {
@@ -287,6 +258,7 @@ export async function getLeaderboard(groupId: string) {
       total_bets: e.total_bets,
       wins: e.wins,
       losses: e.losses,
+      points: e.points,
       win_rate: Number(e.win_rate),
       current_streak: e.current_streak,
       best_streak: e.best_streak,
@@ -297,39 +269,40 @@ export async function getLeaderboard(groupId: string) {
 // ─── Leaderboard update (called by subscribers) ───
 
 export async function handleBetPlaced(
-  seasonId: string,
+  groupId: string,
   userId: string,
   correlationId?: string
 ): Promise<void> {
-  await queries.incrementTotalBets(seasonId, userId);
-  await queries.reRankLeaderboard(seasonId);
+  await queries.incrementTotalBets(groupId, userId);
+  const group = await queries.findGroupById(groupId);
+  await queries.reRankLeaderboard(groupId, group?.scoring_format);
 }
 
 export async function handleBetSettled(
-  seasonId: string,
-  userId: string,
   groupId: string,
+  userId: string,
   won: boolean,
   correlationId?: string
 ): Promise<void> {
   const trx = await getDb().transaction();
   try {
     // Capture old ranks before update
-    const oldEntries = await queries.getLeaderboardEntriesForRankChanges(seasonId, trx);
+    const oldEntries = await queries.getLeaderboardEntriesForRankChanges(groupId, trx);
     const oldRankMap = new Map(
       oldEntries.map((e) => [e.user_id, e.rank ?? 0])
     );
 
     // Apply settlement
-    await queries.applyBetSettlement(seasonId, userId, won, trx);
+    await queries.applyBetSettlement(groupId, userId, won, trx);
 
     // Re-rank
-    await queries.reRankLeaderboard(seasonId, trx);
+    const group = await trx('groups').where('id', groupId).first();
+    await queries.reRankLeaderboard(groupId, group?.scoring_format || 'betting', trx);
 
     await trx.commit();
 
     // Compute rank changes and publish standings update
-    const newEntries = await queries.getLeaderboardWithUsernames(seasonId);
+    const newEntries = await queries.getLeaderboardWithUsernames(groupId);
 
     const rankChanges: Array<{ user_id: string; old_rank: number; new_rank: number }> = [];
     for (const entry of newEntries) {
@@ -347,11 +320,10 @@ export async function handleBetSettled(
       rank: e.rank,
       user_id: e.user_id,
       username: e.username,
-      win_rate: Number(e.win_rate),
+      balance: 0, // TODO: fetch from wallet when needed
     }));
 
     const payload: StandingsUpdatedPayload = {
-      season_id: seasonId,
       group_id: groupId,
       top_entries: topEntries,
       rank_changes: rankChanges,

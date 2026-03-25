@@ -73,6 +73,7 @@ export interface MarketOptionRow {
   player_id: string | null;
   label: string;
   outcome_key: string;
+  odds: number | null;
   is_winner: boolean;
 }
 
@@ -129,8 +130,7 @@ export async function findMarketById(
   marketId: string,
   trx?: Knex.Transaction
 ): Promise<MarketRow | undefined> {
-  const qb = (trx || getDb())('markets').where('id', marketId).first();
-  return qb;
+  return (trx || getDb())('markets').where('id', marketId).first();
 }
 
 export async function findMarketOptionById(
@@ -189,6 +189,7 @@ export async function insertMarketOptions(
     label: string;
     outcome_key: string;
     player_id?: string | null;
+    odds?: number | null;
   }>,
   trx?: Knex.Transaction
 ): Promise<MarketOptionRow[]> {
@@ -218,8 +219,10 @@ export async function setOptionWinner(
 export interface BetRow {
   id: string;
   user_id: string;
-  season_id: string;
+  group_id: string;
   market_option_id: string;
+  predicted_home_score: number | null;
+  predicted_away_score: number | null;
   status: string;
   placed_at: string;
   settled_at: string | null;
@@ -227,17 +230,25 @@ export interface BetRow {
 
 export async function findExistingBet(
   userId: string,
+  groupId: string,
   marketOptionId: string,
   trx?: Knex.Transaction
 ): Promise<BetRow | undefined> {
   return (trx || getDb())('bets')
     .where('user_id', userId)
+    .where('group_id', groupId)
     .where('market_option_id', marketOptionId)
     .first();
 }
 
 export async function insertBet(
-  data: { user_id: string; season_id: string; market_option_id: string },
+  data: {
+    user_id: string;
+    group_id: string;
+    market_option_id: string;
+    predicted_home_score?: number | null;
+    predicted_away_score?: number | null;
+  },
   trx?: Knex.Transaction
 ): Promise<BetRow> {
   const [row] = await (trx || getDb())('bets').insert(data).returning('*');
@@ -261,14 +272,15 @@ export interface BetWithDetails {
   settled_at: string | null;
   market_option_label: string;
   market_option_id: string;
+  market_option_odds: number | null;
   market_type: string;
   home_team: string | null;
   away_team: string | null;
 }
 
-export async function findBetsByUserAndSeason(
+export async function findBetsByUserAndGroup(
   userId: string,
-  seasonId: string,
+  groupId: string,
   status?: string
 ): Promise<BetWithDetails[]> {
   const qb = getDb()('bets')
@@ -276,7 +288,7 @@ export async function findBetsByUserAndSeason(
     .join('markets', 'markets.id', 'market_options.market_id')
     .leftJoin('matches', 'matches.id', 'markets.match_id')
     .where('bets.user_id', userId)
-    .where('bets.season_id', seasonId)
+    .where('bets.group_id', groupId)
     .select(
       'bets.id',
       'bets.status',
@@ -284,6 +296,7 @@ export async function findBetsByUserAndSeason(
       'bets.settled_at',
       'market_options.label as market_option_label',
       'market_options.id as market_option_id',
+      'market_options.odds as market_option_odds',
       'markets.type as market_type',
       'matches.home_team',
       'matches.away_team'
@@ -293,7 +306,7 @@ export async function findBetsByUserAndSeason(
   return qb;
 }
 
-// ─── Membership check ───
+// ─── Membership + Group check ───
 
 export async function isGroupMember(
   userId: string,
@@ -306,8 +319,36 @@ export async function isGroupMember(
   return !!row;
 }
 
-export async function findSeasonById(
-  seasonId: string
-): Promise<{ id: string; group_id: string; competition_id: string } | undefined> {
-  return getDb()('seasons').where('id', seasonId).first();
+export async function findGroupById(
+  groupId: string
+): Promise<{ id: string; scoring_format: string; status: string } | undefined> {
+  return getDb()('groups').where('id', groupId).select('id', 'scoring_format', 'status').first();
+}
+
+/**
+ * Check if a market's competition is linked to a group.
+ */
+export async function isMarketInGroup(
+  marketOptionId: string,
+  groupId: string
+): Promise<boolean> {
+  const option = await getDb()('market_options').where('id', marketOptionId).first();
+  if (!option) return false;
+
+  const market = await getDb()('markets').where('id', option.market_id).first();
+  if (!market) return false;
+
+  // Get the competition_id from the market or via the match
+  let competitionId: string | null = market.competition_id;
+  if (!competitionId && market.match_id) {
+    const match = await getDb()('matches').where('id', market.match_id).first();
+    competitionId = match?.competition_id ?? null;
+  }
+  if (!competitionId) return false;
+
+  // Check if this competition is linked to the group
+  const link = await getDb()('group_competitions')
+    .where({ group_id: groupId, competition_id: competitionId })
+    .first();
+  return !!link;
 }

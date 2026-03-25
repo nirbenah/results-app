@@ -15,7 +15,7 @@ export function registerSubscribers(): void {
     async (envelope: EventEnvelope) => {
       const payload = envelope.payload as BetPlacedPayload;
       await service.handleBetPlaced(
-        payload.season_id,
+        payload.group_id,
         payload.user_id,
         envelope.correlation_id
       );
@@ -32,9 +32,8 @@ export function registerSubscribers(): void {
 
       const won = payload.outcome === 'won';
       await service.handleBetSettled(
-        payload.season_id,
-        payload.user_id,
         payload.group_id,
+        payload.user_id,
         won,
         envelope.correlation_id
       );

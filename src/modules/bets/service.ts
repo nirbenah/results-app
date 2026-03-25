@@ -14,12 +14,18 @@ import {
 } from '../../shared/errors';
 import * as queries from './queries';
 
+// ─── Constants ───
+
+const BET_STAKE = 100;
+
 // ─── Bet Placement ───
 
 export interface PlaceBetParams {
   userId: string;
-  seasonId: string;
+  groupId: string;
   marketOptionId: string;
+  predictedHomeScore?: number | null;
+  predictedAwayScore?: number | null;
   correlationId?: string;
 }
 
@@ -30,21 +36,23 @@ export interface PlaceBetResult {
 }
 
 export async function placeBet(params: PlaceBetParams): Promise<PlaceBetResult> {
-  const { userId, seasonId, marketOptionId, correlationId } = params;
+  const { userId, groupId, marketOptionId, predictedHomeScore, predictedAwayScore, correlationId } = params;
 
-  // Check for existing bet (idempotency via UNIQUE(user_id, market_option_id))
-  const existingBet = await queries.findExistingBet(userId, marketOptionId);
+  // Check for existing bet (idempotency)
+  const existingBet = await queries.findExistingBet(userId, groupId, marketOptionId);
   if (existingBet) {
     const option = await queries.findMarketOptionById(marketOptionId);
     return { bet: existingBet, marketOption: option!, isExisting: true };
   }
 
-  // Validate season and membership
-  const season = await queries.findSeasonById(seasonId);
-  if (!season) throw new NotFoundError('Season');
+  // Validate group exists and is active
+  const group = await queries.findGroupById(groupId);
+  if (!group) throw new NotFoundError('Group');
+  if (group.status !== 'active') throw new BadRequestError('GROUP_NOT_ACTIVE', 'Group is not active');
 
-  const isMember = await queries.isGroupMember(userId, season.group_id);
-  if (!isMember) throw new ForbiddenError('You are not a member of this season\'s group');
+  // Validate membership
+  const isMember = await queries.isGroupMember(userId, groupId);
+  if (!isMember) throw new ForbiddenError('You are not a member of this group');
 
   // Validate market option and market status
   const option = await queries.findMarketOptionById(marketOptionId);
@@ -61,21 +69,30 @@ export async function placeBet(params: PlaceBetParams): Promise<PlaceBetResult> 
     throw new BadRequestError('MARKET_CLOSED', 'Market has passed its closing time');
   }
 
+  // Validate the market's competition is linked to this group
+  const inGroup = await queries.isMarketInGroup(marketOptionId, groupId);
+  if (!inGroup) {
+    throw new BadRequestError('COMPETITION_NOT_IN_GROUP', 'This competition is not part of your group');
+  }
+
   // Insert the bet
   const bet = await queries.insertBet({
     user_id: userId,
-    season_id: seasonId,
+    group_id: groupId,
     market_option_id: marketOptionId,
+    predicted_home_score: predictedHomeScore ?? null,
+    predicted_away_score: predictedAwayScore ?? null,
   });
 
   // Publish bet.placed event
   const payload: BetPlacedPayload = {
     bet_id: bet.id,
     user_id: userId,
-    season_id: seasonId,
-    group_id: season.group_id,
+    group_id: groupId,
     market_option_id: marketOptionId,
     market_type: market.type,
+    stake: BET_STAKE,
+    odds: option.odds ?? null,
   };
   await publishEvent(EventNames.BET_PLACED, payload, correlationId);
 
@@ -84,10 +101,6 @@ export async function placeBet(params: PlaceBetParams): Promise<PlaceBetResult> 
 
 // ─── Settlement Engine ───
 
-/**
- * Settle all open/suspended markets for a finished match.
- * Each market is settled atomically within its own transaction.
- */
 export async function settleMatchMarkets(
   matchFinished: MatchFinishedPayload,
   correlationId?: string
@@ -95,7 +108,6 @@ export async function settleMatchMarkets(
   const db = getDb();
   const { match_id, result } = matchFinished;
 
-  // Get all unsettled markets for this match (outside transaction for the list)
   const marketsToSettle = await db('markets')
     .where('match_id', match_id)
     .whereIn('status', ['open', 'suspended']);
@@ -113,13 +125,10 @@ async function settleMarket(
   const db = getDb();
 
   await db.transaction(async (trx) => {
-    // Determine winning outcome key based on market type and result
     const winningOutcomeKey = determineWinningOutcome(market.type, result);
 
-    // Get all options for this market
     const options = await queries.findOptionsByMarket(market.id, trx);
 
-    // Mark winning option(s)
     const winningOptionIds = new Set<string>();
     for (const option of options) {
       if (option.outcome_key === winningOutcomeKey) {
@@ -128,33 +137,31 @@ async function settleMarket(
       }
     }
 
-    // Settle the market
     await queries.setMarketSettled(market.id, trx);
 
-    // Settle all pending bets on this market
     const pendingBets = await queries.findPendingBetsByMarket(market.id, trx);
 
     for (const bet of pendingBets) {
       const outcome = winningOptionIds.has(bet.market_option_id) ? 'won' : 'lost';
       await queries.updateBetStatus(bet.id, outcome, trx);
 
-      // We need season -> group_id for the event payload.
-      // Fetch it inside the transaction to stay consistent.
-      const season = await trx('seasons').where('id', bet.season_id).first();
+      // Get the option's odds for payout calculation
+      const betOption = options.find((o) => o.id === bet.market_option_id);
+      const odds = betOption?.odds ?? 2.0; // default odds if not set
+      const payout = outcome === 'won' ? Math.floor(BET_STAKE * (odds || 2.0)) : 0;
 
       const betSettledPayload: BetSettledPayload = {
         bet_id: bet.id,
         user_id: bet.user_id,
-        season_id: bet.season_id,
-        group_id: season?.group_id ?? '',
+        group_id: bet.group_id,
         market_option_id: bet.market_option_id,
         market_type: market.type,
         outcome,
+        payout,
       };
       await publishEvent(EventNames.BET_SETTLED, betSettledPayload, correlationId);
     }
 
-    // Publish market.settled
     const marketSettledPayload: MarketSettledPayload = {
       market_id: market.id,
       match_id: market.match_id,
@@ -172,11 +179,8 @@ function determineWinningOutcome(
 ): string {
   switch (marketType) {
     case 'match_outcome':
-      return result.outcome; // 'home' | 'draw' | 'away'
+      return result.outcome;
     default:
-      // For other market types, fall back to the match outcome.
-      // More specific market types (player_stat, in_match_event) would
-      // need richer logic based on the events array in the payload.
       return result.outcome;
   }
 }
@@ -202,7 +206,7 @@ export async function createMatchOutcomeMarket(
     competition_id: null,
     type: 'match_outcome',
     status: 'open',
-    closes_at: kickoffAt, // market closes at kickoff
+    closes_at: kickoffAt,
   });
 
   await queries.insertMarketOptions([

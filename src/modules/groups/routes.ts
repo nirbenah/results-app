@@ -7,8 +7,13 @@ const router = Router();
 router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.userId!;
-    const { name } = req.body;
-    const result = await service.createGroup(userId, name, req.correlationId);
+    const { name, scoring_format, allowed_bet_types, competition_ids } = req.body;
+    const result = await service.createGroup(userId, {
+      name,
+      scoring_format,
+      allowed_bet_types,
+      competition_ids,
+    }, req.correlationId);
     res.status(201).json(result);
   } catch (err) {
     next(err);
@@ -25,7 +30,7 @@ router.get('/:groupId', async (req: Request, res: Response, next: NextFunction) 
   }
 });
 
-// POST /v1/groups/:groupId/members — Invite user
+// POST /v1/groups/:groupId/members — Invite user (commissioner only)
 router.post('/:groupId/members', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.userId!;
@@ -57,7 +62,7 @@ router.post('/:groupId/join', async (req: Request, res: Response, next: NextFunc
   }
 });
 
-// DELETE /v1/groups/:groupId/members/:userId — Remove member
+// DELETE /v1/groups/:groupId/members/:userId — Remove member (commissioner only)
 router.delete('/:groupId/members/:userId', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const requesterId = req.userId!;
@@ -73,15 +78,15 @@ router.delete('/:groupId/members/:userId', async (req: Request, res: Response, n
   }
 });
 
-// POST /v1/groups/:groupId/season — Start season
-router.post('/:groupId/season', async (req: Request, res: Response, next: NextFunction) => {
+// POST /v1/groups/:groupId/competitions — Add competition (commissioner only)
+router.post('/:groupId/competitions', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.userId!;
-    const { competition_id, starts_at, ends_at } = req.body;
-    const result = await service.startSeason(
+    const { competition_id } = req.body;
+    const result = await service.addCompetition(
       req.params.groupId as string,
       userId,
-      { competition_id, starts_at, ends_at },
+      competition_id,
       req.correlationId
     );
     res.status(201).json(result);
@@ -90,18 +95,17 @@ router.post('/:groupId/season', async (req: Request, res: Response, next: NextFu
   }
 });
 
-// PATCH /v1/groups/:groupId/season/status — Activate or finish season
-router.patch('/:groupId/season/status', async (req: Request, res: Response, next: NextFunction) => {
+// DELETE /v1/groups/:groupId/competitions/:competitionId — Remove competition (commissioner only)
+router.delete('/:groupId/competitions/:competitionId', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.userId!;
-    const { status } = req.body;
-    const result = await service.updateSeasonStatus(
+    await service.removeCompetition(
       req.params.groupId as string,
       userId,
-      status,
+      req.params.competitionId as string,
       req.correlationId
     );
-    res.status(200).json(result);
+    res.status(204).send();
   } catch (err) {
     next(err);
   }

@@ -14,7 +14,6 @@ import {
   MatchStartedPayload,
   BetSettledPayload,
   StandingsUpdatedPayload,
-  SeasonFinishedPayload,
 } from '../../shared/events/types';
 import { ChannelManager } from './channels';
 
@@ -22,8 +21,8 @@ export function registerSubscribers(channelManager: ChannelManager): void {
   const bus = getEventBus();
 
   /**
-   * match.started — notify all members of groups that have a season
-   * with this match's competition.
+   * match.started — notify all members of groups that have this match's
+   * competition linked via group_competitions.
    */
   bus.subscribe(
     EventNames.MATCH_STARTED,
@@ -35,12 +34,12 @@ export function registerSubscribers(channelManager: ChannelManager): void {
       const match = await db('matches').where({ id: payload.match_id }).first();
       if (!match) return;
 
-      // Find all groups with an active season for this competition
-      const members = await db('seasons')
-        .join('groups', 'groups.id', 'seasons.group_id')
+      // Find all members of active groups linked to this competition
+      const members = await db('group_competitions')
+        .join('groups', 'groups.id', 'group_competitions.group_id')
         .join('group_members', 'group_members.group_id', 'groups.id')
-        .where('seasons.competition_id', match.competition_id)
-        .where('seasons.status', 'active')
+        .where('group_competitions.competition_id', match.competition_id)
+        .where('groups.status', 'active')
         .select('group_members.user_id')
         .distinct();
 
@@ -64,7 +63,7 @@ export function registerSubscribers(channelManager: ChannelManager): void {
 
       const outcomeText =
         payload.outcome === 'won'
-          ? 'Your bet won!'
+          ? `Your bet won! Payout: ${payload.payout} credits.`
           : payload.outcome === 'lost'
             ? 'Your bet lost.'
             : 'Your bet was voided.';
@@ -95,33 +94,6 @@ export function registerSubscribers(channelManager: ChannelManager): void {
           `You moved ${arrow} from #${change.old_rank} to #${change.new_rank}`
         );
       }
-    }
-  );
-
-  /**
-   * season.finished — notify all members that the season has ended.
-   */
-  bus.subscribe(
-    EventNames.SEASON_FINISHED,
-    async (envelope: EventEnvelope) => {
-      const payload = envelope.payload as SeasonFinishedPayload;
-      const db = getDb();
-
-      // Get all group members
-      const members = await db('group_members')
-        .where({ group_id: payload.group_id })
-        .select('user_id');
-
-      const winner = payload.final_standings.find((s) => s.rank === 1);
-      const winnerName = winner?.username ?? 'Unknown';
-
-      const userIds = members.map((m: { user_id: string }) => m.user_id);
-
-      await channelManager.sendToMany(
-        userIds,
-        'Season finished',
-        `The season has ended! Winner: ${winnerName}`
-      );
     }
   );
 }

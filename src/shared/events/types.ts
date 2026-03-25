@@ -10,7 +10,7 @@ export interface EventEnvelope<T = unknown> {
   payload: T;
 }
 
-// ─── Live Data Service events ───
+// ─── Live Data / Admin events ───
 
 export interface MatchScheduledPayload {
   match_id: string;
@@ -55,20 +55,21 @@ export interface MatchFinishedPayload {
 export interface BetPlacedPayload {
   bet_id: string;
   user_id: string;
-  season_id: string;
   group_id: string;
   market_option_id: string;
   market_type: string;
+  stake: number;
+  odds: number | null;
 }
 
 export interface BetSettledPayload {
   bet_id: string;
   user_id: string;
-  season_id: string;
   group_id: string;
   market_option_id: string;
   market_type: string;
   outcome: 'won' | 'lost' | 'void';
+  payout: number;
 }
 
 export interface MarketSettledPayload {
@@ -82,13 +83,12 @@ export interface MarketSettledPayload {
 // ─── Groups Service events ───
 
 export interface StandingsUpdatedPayload {
-  season_id: string;
   group_id: string;
   top_entries: Array<{
     rank: number;
     user_id: string;
     username: string;
-    win_rate: number;
+    balance: number;
   }>;
   rank_changes: Array<{
     user_id: string;
@@ -97,16 +97,12 @@ export interface StandingsUpdatedPayload {
   }>;
 }
 
-export interface SeasonFinishedPayload {
-  season_id: string;
+// ─── Member events ───
+
+export interface MemberJoinedPayload {
   group_id: string;
-  final_standings: Array<{
-    rank: number;
-    user_id: string;
-    username: string;
-    win_rate: number;
-    best_streak: number;
-  }>;
+  user_id: string;
+  scoring_format: string;
 }
 
 // ─── Event name constants ───
@@ -120,5 +116,5 @@ export const EventNames = {
   BET_SETTLED: 'bet.settled',
   MARKET_SETTLED: 'market.settled',
   GROUP_STANDINGS_UPDATED: 'group.standings_updated',
-  SEASON_FINISHED: 'season.finished',
+  MEMBER_JOINED: 'member.joined',
 } as const;

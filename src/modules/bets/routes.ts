@@ -5,15 +5,9 @@ import { BadRequestError } from '../../shared/errors';
 
 const router = Router();
 
-// Augment Express Request with auth fields
-interface AuthRequest extends Request {
-  userId?: string;
-  correlationId?: string;
-}
-
 // ─── GET /v1/competitions ───
 
-router.get('/competitions', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/competitions', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { sport, country, type } = req.query as Record<string, string | undefined>;
     const rows = await queries.findCompetitions({ sport, country, type });
@@ -32,7 +26,7 @@ router.get('/competitions', async (req: AuthRequest, res: Response, next: NextFu
 
 router.get(
   '/competitions/:competitionId/matches',
-  async (req: AuthRequest, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const competitionId = req.params.competitionId as string;
       const { status, from, to } = req.query as Record<string, string | undefined>;
@@ -55,7 +49,7 @@ router.get(
 
 router.get(
   '/matches/:matchId/markets',
-  async (req: AuthRequest, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const matchId = req.params.matchId as string;
       const markets = await queries.findMarketsByMatch(matchId);
@@ -72,7 +66,7 @@ router.get(
 
 router.get(
   '/competitions/:competitionId/markets',
-  async (req: AuthRequest, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const competitionId = req.params.competitionId as string;
       const markets = await queries.findMarketsByCompetition(competitionId);
@@ -87,27 +81,24 @@ router.get(
 
 // ─── POST /v1/bets ───
 
-router.post('/bets', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.post('/bets', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.userId;
     if (!userId) {
       throw new BadRequestError('AUTH_REQUIRED', 'Authentication is required');
     }
 
-    const idempotencyKey = req.headers['idempotency-key'];
-    if (!idempotencyKey) {
-      throw new BadRequestError('MISSING_HEADER', 'Idempotency-Key header is required');
-    }
-
-    const { season_id, market_option_id } = req.body;
-    if (!season_id || !market_option_id) {
-      throw new BadRequestError('VALIDATION', 'season_id and market_option_id are required');
+    const { group_id, market_option_id, predicted_home_score, predicted_away_score } = req.body;
+    if (!group_id || !market_option_id) {
+      throw new BadRequestError('VALIDATION', 'group_id and market_option_id are required');
     }
 
     const result = await service.placeBet({
       userId,
-      seasonId: season_id,
+      groupId: group_id,
       marketOptionId: market_option_id,
+      predictedHomeScore: predicted_home_score,
+      predictedAwayScore: predicted_away_score,
       correlationId: req.correlationId,
     });
 
@@ -117,11 +108,11 @@ router.post('/bets', async (req: AuthRequest, res: Response, next: NextFunction)
       market_option: {
         id: result.marketOption.id,
         label: result.marketOption.label,
+        odds: result.marketOption.odds,
       },
       placed_at: result.bet.placed_at,
     };
 
-    // Return 200 for idempotent duplicate, 201 for new bet
     res.status(result.isExisting ? 200 : 201).json(responseBody);
   } catch (err) {
     next(err);
@@ -130,25 +121,26 @@ router.post('/bets', async (req: AuthRequest, res: Response, next: NextFunction)
 
 // ─── GET /v1/bets ───
 
-router.get('/bets', async (req: AuthRequest, res: Response, next: NextFunction) => {
+router.get('/bets', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.userId;
     if (!userId) {
       throw new BadRequestError('AUTH_REQUIRED', 'Authentication is required');
     }
 
-    const { season_id, status } = req.query as Record<string, string | undefined>;
-    if (!season_id) {
-      throw new BadRequestError('VALIDATION', 'season_id query parameter is required');
+    const { group_id, status } = req.query as Record<string, string | undefined>;
+    if (!group_id) {
+      throw new BadRequestError('VALIDATION', 'group_id query parameter is required');
     }
 
-    const rows = await queries.findBetsByUserAndSeason(userId, season_id, status);
+    const rows = await queries.findBetsByUserAndGroup(userId, group_id, status);
 
     const bets = rows.map((b) => ({
       id: b.id,
       status: b.status,
       market_option: {
         label: b.market_option_label,
+        odds: b.market_option_odds,
       },
       market: {
         type: b.market_type,
@@ -170,7 +162,7 @@ router.get('/bets', async (req: AuthRequest, res: Response, next: NextFunction) 
 
 router.post(
   '/admin/matches/:matchId/finish',
-  async (req: AuthRequest, res: Response, next: NextFunction) => {
+  async (req: Request, res: Response, next: NextFunction) => {
     try {
       const matchId = req.params.matchId as string;
       const { home_score, away_score } = req.body;
@@ -181,23 +173,19 @@ router.post(
 
       const db = (await import('../../shared/db')).getDb();
 
-      // Get the match
       const match = await db('matches').where({ id: matchId }).first();
       if (!match) {
         throw new BadRequestError('NOT_FOUND', 'Match not found');
       }
 
-      // Determine outcome
       const outcome: 'home' | 'draw' | 'away' =
         home_score > away_score ? 'home' : home_score < away_score ? 'away' : 'draw';
 
-      // Update match status and result
       await db('matches').where({ id: matchId }).update({
         status: 'finished',
         result: JSON.stringify({ home_score, away_score, outcome }),
       });
 
-      // Publish match.finished and let the settlement engine handle everything
       const { publishEvent } = await import('../../shared/events/publish');
       const { EventNames } = await import('../../shared/events/types');
 
@@ -235,6 +223,7 @@ function formatMarket(m: queries.MarketWithOptions) {
       id: o.id,
       label: o.label,
       outcome_key: o.outcome_key,
+      odds: o.odds,
       ...(o.player_id ? { player: o.player_id } : {}),
     })),
   };

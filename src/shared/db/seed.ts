@@ -3,10 +3,10 @@
  * Run: npx ts-node src/shared/db/seed.ts
  *
  * Creates:
- * - 2 competitions (Premier League, Champions League)
+ * - 2 competitions (Premier League 24/25, Champions League 24/25)
  * - 6 matches (3 per competition)
  * - 10 players
- * - Markets + options auto-created for each match
+ * - Markets + options with odds for each match
  */
 import dotenv from 'dotenv';
 dotenv.config();
@@ -123,7 +123,7 @@ async function seed() {
   const matches = await db('matches').insert(matchData).returning('*');
   console.log(`[Seed] ${matches.length} matches created`);
 
-  // ─── Markets + Options for each match ───
+  // ─── Markets + Options with odds for each match ───
   for (const match of matches) {
     // match_outcome market
     const [market] = await db('markets')
@@ -140,42 +140,21 @@ async function seed() {
         market_id: market.id,
         label: `${match.home_team} win`,
         outcome_key: 'home',
+        odds: 2.1,
       },
       {
         market_id: market.id,
         label: 'Draw',
         outcome_key: 'draw',
+        odds: 3.4,
       },
       {
         market_id: market.id,
         label: `${match.away_team} win`,
         outcome_key: 'away',
+        odds: 3.0,
       },
     ]);
-
-    // player_stat market for first 2 matches (Arsenal and Liverpool home games)
-    if (match.home_team === 'Arsenal' || match.home_team === 'Liverpool') {
-      const homePlayers = players.filter((p) => p.team === match.home_team);
-      if (homePlayers.length > 0) {
-        const [playerMarket] = await db('markets')
-          .insert({
-            match_id: match.id,
-            type: 'player_stat',
-            status: 'open',
-            closes_at: match.kickoff_at,
-          })
-          .returning('*');
-
-        const playerOptions = homePlayers.slice(0, 2).map((p) => ({
-          market_id: playerMarket.id,
-          player_id: p.id,
-          label: `${p.name} scores anytime`,
-          outcome_key: 'player_scores',
-        }));
-
-        await db('market_options').insert(playerOptions);
-      }
-    }
   }
 
   console.log('[Seed] Markets and options created');
@@ -191,10 +170,10 @@ async function seed() {
     .returning('*');
 
   await db('market_options').insert([
-    { market_id: outrightMarket.id, label: 'Arsenal', outcome_key: 'arsenal' },
-    { market_id: outrightMarket.id, label: 'Liverpool', outcome_key: 'liverpool' },
-    { market_id: outrightMarket.id, label: 'Manchester City', outcome_key: 'man_city' },
-    { market_id: outrightMarket.id, label: 'Chelsea', outcome_key: 'chelsea' },
+    { market_id: outrightMarket.id, label: 'Arsenal', outcome_key: 'arsenal', odds: 2.5 },
+    { market_id: outrightMarket.id, label: 'Liverpool', outcome_key: 'liverpool', odds: 3.0 },
+    { market_id: outrightMarket.id, label: 'Manchester City', outcome_key: 'man_city', odds: 2.8 },
+    { market_id: outrightMarket.id, label: 'Chelsea', outcome_key: 'chelsea', odds: 8.0 },
   ]);
 
   console.log('[Seed] Outright market created');

@@ -79,6 +79,7 @@
   .option-btn:hover { border-color: #4f6fff; background: #2a2b45; }
   .option-btn.selected { border-color: #4ade80; background: #064e3b; }
   .option-label { font-size: 13px; color: #e1e1e6; }
+  .option-odds { font-size: 11px; color: #fbbf24; font-weight: 600; margin-top: 2px; }
 
   /* Leaderboard */
   .lb-row { display: flex; align-items: center; padding: 10px 12px; background: #252636; border-radius: 8px; margin-bottom: 4px; }
@@ -113,6 +114,12 @@
   .setup-step.done { opacity: 0.5; }
   .step-number { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: #4f6fff; color: white; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; margin-right: 8px; }
   .step-number.done { background: #059669; }
+
+  /* Competition chips */
+  .comp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .comp-chip { display: inline-flex; align-items: center; gap: 4px; background: #252636; border: 1px solid #2a2b35; border-radius: 16px; padding: 4px 10px; font-size: 12px; cursor: pointer; }
+  .comp-chip.selected { border-color: #4ade80; background: #064e3b; }
+  .comp-chip .remove { color: #f87171; cursor: pointer; font-weight: 700; margin-left: 2px; }
 
   .hidden { display: none !important; }
   .empty { color: #4b5563; font-size: 13px; text-align: center; padding: 20px; }
@@ -208,8 +215,19 @@
           <div class="form-group">
             <input id="new-group-name" placeholder="Group name (e.g. The Rivals)" />
           </div>
+          <div class="form-group">
+            <label>Scoring Format</label>
+            <select id="scoring-format">
+              <option value="betting">Betting (1000 credits, stake x odds)</option>
+              <option value="points">Points (3/2/1 per correct bet)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Select Competitions</label>
+            <div class="comp-chips" id="comp-chips-create"></div>
+          </div>
           <button class="btn btn-primary btn-block" id="btn-create-group">Create Group</button>
-          <div style="text-align:center;color:#6b7280;font-size:12px;margin:12px 0;">— or —</div>
+          <div style="text-align:center;color:#6b7280;font-size:12px;margin:12px 0;">--- or ---</div>
           <div class="form-group">
             <input id="join-group-id" placeholder="Paste group invite code" />
           </div>
@@ -221,34 +239,22 @@
       <div id="group-active" class="hidden">
         <div class="card">
           <div class="card-title" id="group-detail-name"></div>
-          <div style="font-size:12px;color:#6b7280;" id="group-detail-members"></div>
+          <div style="font-size:12px;color:#6b7280;" id="group-detail-info"></div>
           <div class="invite-box" id="group-invite-code"></div>
           <div style="font-size:11px;color:#6b7280;margin-top:4px;">Share this code so others can join</div>
         </div>
 
-        <!-- Add member (commissioner only) -->
-        <div id="add-member-area" class="hidden">
-          <div class="card">
-            <div class="card-title">Add Member</div>
+        <!-- Competitions in group -->
+        <div class="card" id="group-competitions-card">
+          <div class="card-title">Competitions</div>
+          <div id="group-competitions-list"></div>
+          <!-- Add competition (commissioner only) -->
+          <div id="add-comp-area" class="hidden" style="margin-top:10px;">
             <div class="form-group">
-              <input id="add-member-id" placeholder="User ID to add" />
+              <select id="add-comp-select"></select>
             </div>
-            <button class="btn btn-primary btn-sm" id="btn-add-member">Add</button>
+            <button class="btn btn-success btn-sm" id="btn-add-comp">Add Competition</button>
           </div>
-        </div>
-
-        <!-- Season controls -->
-        <div id="season-setup" class="card hidden">
-          <div class="card-title"><span class="step-number">2</span> Start a Season</div>
-          <div class="form-group">
-            <select id="comp-select"></select>
-          </div>
-          <button class="btn btn-success btn-block" id="btn-start-season">Start Season</button>
-        </div>
-
-        <div id="season-active-info" class="card hidden">
-          <div class="card-title">Current Season <span class="badge badge-active" id="season-status-badge">active</span></div>
-          <div style="font-size:13px;color:#9ca3af;" id="season-comp-name"></div>
         </div>
       </div>
 
@@ -267,46 +273,44 @@
 </div>
 
 <script>
-// ─── Config ───
-const API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:')
+// --- Config ---
+var API = (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || location.protocol === 'file:')
   ? 'http://localhost:3000'
   : 'https://results-app-production-4e7e.up.railway.app';
 
-const STORAGE_KEY = 'results_app_session';
+var STORAGE_KEY = 'results_app_session';
 
-const state = {
+var state = {
   token: null,
   userId: null,
   username: null,
   groupId: null,
-  seasonId: null,
-  seasonStatus: null,
+  scoringFormat: null,
   isCommissioner: false,
   competitions: [],
   currentScreen: 'matches',
 };
 
-// ─── Persistence ───
+// --- Persistence ---
 function saveSession() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify({
     token: state.token,
     userId: state.userId,
     username: state.username,
     groupId: state.groupId,
-    seasonId: state.seasonId,
-    seasonStatus: state.seasonStatus,
+    scoringFormat: state.scoringFormat,
     isCommissioner: state.isCommissioner,
   }));
 }
 
 function loadSession() {
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+    var saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
     if (saved && saved.token) {
       Object.assign(state, saved);
       return true;
     }
-  } catch {}
+  } catch (e) {}
   return false;
 }
 
@@ -316,25 +320,21 @@ function clearSession() {
   state.userId = null;
   state.username = null;
   state.groupId = null;
-  state.seasonId = null;
-  state.seasonStatus = null;
+  state.scoringFormat = null;
   state.isCommissioner = false;
 }
 
-// ─── API helper ───
+// --- API helper ---
 async function api(method, path, body) {
-  const headers = { 'Content-Type': 'application/json' };
+  var headers = { 'Content-Type': 'application/json' };
   if (state.token) {
     headers['Authorization'] = 'Bearer ' + state.token;
   }
-  if (method === 'POST' && path.includes('/bets')) {
-    headers['Idempotency-Key'] = Date.now().toString(36) + Math.random().toString(36).slice(2);
-  }
-  const opts = { method, headers };
+  var opts = { method: method, headers: headers };
   if (body) opts.body = JSON.stringify(body);
 
-  const res = await fetch(API + path, opts);
-  const data = await res.json();
+  var res = await fetch(API + path, opts);
+  var data = await res.json();
 
   if (!res.ok) {
     if (res.status === 401) {
@@ -346,48 +346,46 @@ async function api(method, path, body) {
   return data;
 }
 
-// ─── Logging ───
+// --- Logging ---
 function log(msg, type) {
-  const el = document.getElementById('activity-log');
+  var el = document.getElementById('activity-log');
   if (!el) return;
-  const entry = document.createElement('div');
+  var entry = document.createElement('div');
   entry.className = 'log-entry ' + (type || '');
   entry.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
   el.prepend(entry);
 }
 
-// ─── Connection check ───
+// --- Connection check ---
 async function checkConnection() {
   try {
     await api('GET', '/health');
     document.getElementById('conn-status').textContent = 'Connected';
     document.getElementById('conn-status').className = 'status connected';
-  } catch {
+  } catch (e) {
     document.getElementById('conn-status').textContent = 'Offline';
   }
 }
 
-// ─── Screen management ───
+// --- Screen management ---
 function showScreen(name) {
-  const screens = ['auth', 'matches', 'bets', 'leaderboard', 'wallet', 'group'];
+  var screens = ['auth', 'matches', 'bets', 'leaderboard', 'wallet', 'group'];
   screens.forEach(function(s) {
-    const el = document.getElementById('screen-' + s);
+    var el = document.getElementById('screen-' + s);
     if (el) el.classList.toggle('hidden', s !== name);
   });
   state.currentScreen = name;
 
-  // Update nav
   document.querySelectorAll('.nav-item').forEach(function(btn) {
     btn.classList.toggle('active', btn.dataset.screen === name);
   });
 
-  // Show/hide nav and userbar
-  const loggedIn = !!state.token;
+  var loggedIn = !!state.token;
   document.getElementById('bottomnav').classList.toggle('hidden', !loggedIn);
   document.getElementById('userbar').classList.toggle('hidden', !loggedIn);
 }
 
-// ─── Auth ───
+// --- Auth ---
 async function doRegister() {
   var username = document.getElementById('auth-username').value.trim();
   var email = document.getElementById('auth-email').value.trim();
@@ -432,19 +430,24 @@ async function onLogin() {
   document.getElementById('user-name').textContent = state.username;
   showScreen('matches');
 
-  // Load data in parallel
   await Promise.all([
-    loadWallet(),
     loadCompetitions(),
-    loadMatches(),
     loadGroupState(),
+    loadMatches(),
   ]);
+  if (state.groupId) {
+    loadWallet();
+  }
 }
 
-// ─── Wallet ───
+// --- Wallet ---
 async function loadWallet() {
+  if (!state.groupId) {
+    document.getElementById('user-balance').textContent = '';
+    return;
+  }
   try {
-    var data = await api('GET', '/v1/wallet');
+    var data = await api('GET', '/v1/wallet?group_id=' + state.groupId);
     document.getElementById('user-balance').textContent = data.balance + ' credits';
     document.getElementById('wallet-balance-big').textContent = data.balance;
 
@@ -468,76 +471,147 @@ async function loadWallet() {
   }
 }
 
-// ─── Competitions ───
+// --- Competitions ---
 async function loadCompetitions() {
   try {
     var data = await api('GET', '/v1/competitions');
     state.competitions = data.competitions;
-    var select = document.getElementById('comp-select');
-    select.innerHTML = data.competitions.map(function(c) {
-      return '<option value="' + c.id + '">' + c.name + '</option>';
-    }).join('');
+    renderCompChips();
   } catch (e) {
     console.error('Competitions error:', e);
   }
 }
 
-// ─── Group state ───
+function renderCompChips() {
+  var container = document.getElementById('comp-chips-create');
+  if (!container) return;
+  container.innerHTML = state.competitions.map(function(c) {
+    return '<div class="comp-chip" data-id="' + c.id + '" data-name="' + c.name + '">' + c.name + '</div>';
+  }).join('');
+
+  container.querySelectorAll('.comp-chip').forEach(function(chip) {
+    chip.addEventListener('click', function() {
+      this.classList.toggle('selected');
+    });
+  });
+}
+
+// --- Group state ---
 async function loadGroupState() {
   if (!state.groupId) {
     document.getElementById('group-none').classList.remove('hidden');
     document.getElementById('group-active').classList.add('hidden');
+    document.getElementById('group-banner').classList.add('hidden');
     return;
   }
 
   try {
     var data = await api('GET', '/v1/groups/' + state.groupId);
     state.isCommissioner = data.commissioner_id === state.userId;
+    state.scoringFormat = data.scoring_format || 'betting';
 
     document.getElementById('group-none').classList.add('hidden');
     document.getElementById('group-active').classList.remove('hidden');
 
     document.getElementById('group-detail-name').textContent = data.name;
-    document.getElementById('group-detail-members').textContent = data.member_count + ' members';
+    document.getElementById('group-detail-info').textContent =
+      data.member_count + ' members | ' + (data.scoring_format || 'betting') + ' format';
     document.getElementById('group-invite-code').textContent = state.groupId;
 
     // Group banner on matches screen
     document.getElementById('group-banner').classList.remove('hidden');
     document.getElementById('group-banner-name').textContent = data.name;
+    document.getElementById('group-banner-info').textContent =
+      (data.scoring_format || 'betting') + ' format | ' + data.member_count + ' members';
 
-    if (data.season) {
-      state.seasonId = data.season.id;
-      state.seasonStatus = data.season.status;
-      document.getElementById('season-setup').classList.add('hidden');
-      document.getElementById('season-active-info').classList.remove('hidden');
-      document.getElementById('season-status-badge').textContent = data.season.status;
-      document.getElementById('season-comp-name').textContent = data.season.competition?.name || '';
-      document.getElementById('group-banner-info').textContent = data.season.competition?.name + ' - ' + data.season.status;
-      saveSession();
-    } else if (state.isCommissioner) {
-      document.getElementById('season-setup').classList.remove('hidden');
-      document.getElementById('season-active-info').classList.add('hidden');
-    }
+    // Render competitions
+    renderGroupCompetitions(data.competitions || []);
 
+    // Show add competition area for commissioner
     if (state.isCommissioner) {
-      document.getElementById('add-member-area').classList.remove('hidden');
+      document.getElementById('add-comp-area').classList.remove('hidden');
+      renderAddCompSelect(data.competitions || []);
+    } else {
+      document.getElementById('add-comp-area').classList.add('hidden');
     }
+
+    saveSession();
   } catch (e) {
-    // Group might have been deleted
     state.groupId = null;
     saveSession();
     loadGroupState();
   }
 }
 
-// ─── Matches ───
+function renderGroupCompetitions(groupComps) {
+  var container = document.getElementById('group-competitions-list');
+  if (groupComps.length === 0) {
+    container.innerHTML = '<div class="empty">No competitions added yet</div>';
+    return;
+  }
+  var html = '';
+  for (var i = 0; i < groupComps.length; i++) {
+    var c = groupComps[i];
+    var name = c.name || c.competition_id;
+    html += '<div class="comp-chip">' + name;
+    if (state.isCommissioner) {
+      html += ' <span class="remove" data-comp-id="' + c.competition_id + '">x</span>';
+    }
+    html += '</div>';
+  }
+  container.innerHTML = html;
+
+  // Attach remove listeners
+  container.querySelectorAll('.remove').forEach(function(btn) {
+    btn.addEventListener('click', function() { removeCompetition(this.dataset.compId); });
+  });
+}
+
+function renderAddCompSelect(currentComps) {
+  var currentIds = currentComps.map(function(c) { return c.competition_id; });
+  var available = state.competitions.filter(function(c) { return currentIds.indexOf(c.id) === -1; });
+  var select = document.getElementById('add-comp-select');
+  if (available.length === 0) {
+    select.innerHTML = '<option value="">All competitions added</option>';
+    return;
+  }
+  select.innerHTML = available.map(function(c) {
+    return '<option value="' + c.id + '">' + c.name + '</option>';
+  }).join('');
+}
+
+async function addCompetition() {
+  var compId = document.getElementById('add-comp-select').value;
+  if (!compId || !state.groupId) return;
+
+  try {
+    await api('POST', '/v1/groups/' + state.groupId + '/competitions', { competition_id: compId });
+    log('Competition added!', 'success');
+    await loadGroupState();
+  } catch (e) {
+    alert('Add competition error: ' + e.message);
+  }
+}
+
+async function removeCompetition(compId) {
+  if (!state.groupId) return;
+  try {
+    await api('DELETE', '/v1/groups/' + state.groupId + '/competitions/' + compId);
+    log('Competition removed', 'success');
+    await loadGroupState();
+  } catch (e) {
+    alert('Remove competition error: ' + e.message);
+  }
+}
+
+// --- Matches ---
 async function loadMatches() {
   var container = document.getElementById('matches-list');
   if (!state.competitions.length) {
     try {
       var data = await api('GET', '/v1/competitions');
       state.competitions = data.competitions;
-    } catch { return; }
+    } catch (e) { return; }
   }
 
   var html = '';
@@ -595,8 +669,8 @@ async function toggleMarkets(matchId) {
     return;
   }
 
-  if (!state.seasonId) {
-    alert('No active season. Go to Group tab and set one up first.');
+  if (!state.groupId) {
+    alert('Join or create a group first (Group tab).');
     return;
   }
 
@@ -611,8 +685,10 @@ async function toggleMarkets(matchId) {
         + '<div class="options">';
       for (var j = 0; j < market.options.length; j++) {
         var opt = market.options[j];
+        var oddsText = opt.odds ? opt.odds.toFixed(1) : '-';
         html += '<div class="option-btn" data-action="place-bet" data-option="' + opt.id + '" data-label="' + opt.label + '">'
           + '<div class="option-label">' + opt.label + '</div>'
+          + '<div class="option-odds">' + oddsText + '</div>'
           + '</div>';
       }
       html += '</div></div>';
@@ -620,7 +696,6 @@ async function toggleMarkets(matchId) {
     container.innerHTML = html;
     container.classList.remove('hidden');
 
-    // Attach bet listeners
     container.querySelectorAll('[data-action="place-bet"]').forEach(function(btn) {
       btn.addEventListener('click', function() { placeBet(this.dataset.option, this.dataset.label, this); });
     });
@@ -630,14 +705,14 @@ async function toggleMarkets(matchId) {
 }
 
 async function placeBet(optionId, label, el) {
-  if (!state.seasonId) {
-    alert('No active season!');
+  if (!state.groupId) {
+    alert('Join or create a group first!');
     return;
   }
 
   try {
     await api('POST', '/v1/bets', {
-      season_id: state.seasonId,
+      group_id: state.groupId,
       market_option_id: optionId,
     });
 
@@ -650,7 +725,7 @@ async function placeBet(optionId, label, el) {
   }
 }
 
-// ─── Settle ───
+// --- Settle ---
 function toggleSettle(matchId, homeTeam, awayTeam) {
   var container = document.getElementById('settle-' + matchId);
   if (!container.classList.contains('hidden')) {
@@ -698,13 +773,13 @@ async function doSettle(matchId) {
   }
 }
 
-// ─── Bets ───
+// --- Bets ---
 async function loadBets() {
-  if (!state.seasonId) return;
+  if (!state.groupId) return;
   var container = document.getElementById('bets-list');
 
   try {
-    var data = await api('GET', '/v1/bets?season_id=' + state.seasonId);
+    var data = await api('GET', '/v1/bets?group_id=' + state.groupId);
     if (data.bets.length === 0) {
       container.innerHTML = '<div class="empty">No bets placed yet</div>';
       return;
@@ -715,8 +790,9 @@ async function loadBets() {
       var bet = data.bets[i];
       var matchInfo = bet.market && bet.market.match ? bet.market.match.home_team + ' vs ' + bet.market.match.away_team : 'Outright';
       var statusCls = bet.status === 'won' ? 'badge-won' : bet.status === 'lost' ? 'badge-lost' : 'badge-pending';
+      var oddsInfo = bet.market_option.odds ? ' @ ' + Number(bet.market_option.odds).toFixed(1) : '';
       html += '<div class="card">'
-        + '<div class="card-title">' + bet.market_option.label + ' <span class="badge ' + statusCls + '">' + bet.status + '</span></div>'
+        + '<div class="card-title">' + bet.market_option.label + oddsInfo + ' <span class="badge ' + statusCls + '">' + bet.status + '</span></div>'
         + '<div style="font-size:12px;color:#6b7280">' + matchInfo + '</div>'
         + '</div>';
     }
@@ -726,7 +802,7 @@ async function loadBets() {
   }
 }
 
-// ─── Leaderboard ───
+// --- Leaderboard ---
 async function loadLeaderboard() {
   if (!state.groupId) return;
   var container = document.getElementById('leaderboard-list');
@@ -761,19 +837,32 @@ async function loadLeaderboard() {
   }
 }
 
-// ─── Group actions ───
+// --- Group actions ---
 async function createGroup() {
   var name = document.getElementById('new-group-name').value.trim();
   if (!name) return alert('Enter a group name');
 
+  var scoringFormat = document.getElementById('scoring-format').value;
+
+  // Get selected competition IDs
+  var selectedChips = document.querySelectorAll('#comp-chips-create .comp-chip.selected');
+  var competitionIds = [];
+  selectedChips.forEach(function(chip) {
+    competitionIds.push(chip.dataset.id);
+  });
+
   try {
-    var group = await api('POST', '/v1/groups', { name: name });
+    var group = await api('POST', '/v1/groups', {
+      name: name,
+      scoring_format: scoringFormat,
+      competition_ids: competitionIds,
+    });
     state.groupId = group.id;
+    state.scoringFormat = scoringFormat;
     state.isCommissioner = true;
     saveSession();
     log('Group "' + name + '" created!', 'success');
-    await loadGroupState();
-    await loadCompetitions();
+    await Promise.all([loadGroupState(), loadWallet()]);
   } catch (e) {
     alert('Group error: ' + e.message);
   }
@@ -784,58 +873,17 @@ async function joinGroup() {
   if (!groupId) return alert('Paste a group invite code');
 
   try {
-    // Actually join the group on the server (adds user as member)
     await api('POST', '/v1/groups/' + groupId + '/join');
     state.groupId = groupId;
     saveSession();
     log('Joined group!', 'success');
-    await loadGroupState();
+    await Promise.all([loadGroupState(), loadWallet()]);
   } catch (e) {
     alert('Join error: ' + e.message);
   }
 }
 
-async function addMember() {
-  var userId = document.getElementById('add-member-id').value.trim();
-  if (!userId) return alert('Enter a user ID');
-
-  try {
-    await api('POST', '/v1/groups/' + state.groupId + '/members', { user_id: userId });
-    log('Member added!', 'success');
-    document.getElementById('add-member-id').value = '';
-    await loadGroupState();
-  } catch (e) {
-    alert('Add member error: ' + e.message);
-  }
-}
-
-async function startSeason() {
-  var compId = document.getElementById('comp-select').value;
-  if (!compId || !state.groupId) return;
-
-  try {
-    var season = await api('POST', '/v1/groups/' + state.groupId + '/season', {
-      competition_id: compId,
-      starts_at: '2024-08-17T00:00:00Z',
-      ends_at: '2025-05-25T00:00:00Z',
-    });
-    state.seasonId = season.id;
-    state.seasonStatus = 'upcoming';
-    log('Season created', 'success');
-
-    // Activate
-    await api('PATCH', '/v1/groups/' + state.groupId + '/season/status', { status: 'active' });
-    state.seasonStatus = 'active';
-    saveSession();
-    log('Season activated!', 'success');
-
-    await Promise.all([loadGroupState(), loadMatches(), loadLeaderboard()]);
-  } catch (e) {
-    alert('Season error: ' + e.message);
-  }
-}
-
-// ─── Navigation event listeners ───
+// --- Navigation event listeners ---
 document.querySelectorAll('.nav-item').forEach(function(btn) {
   btn.addEventListener('click', function() {
     var screen = this.dataset.screen;
@@ -853,10 +901,9 @@ document.getElementById('btn-login').addEventListener('click', doLogin);
 document.getElementById('btn-logout').addEventListener('click', doLogout);
 document.getElementById('btn-create-group').addEventListener('click', createGroup);
 document.getElementById('btn-join-group').addEventListener('click', joinGroup);
-document.getElementById('btn-add-member').addEventListener('click', addMember);
-document.getElementById('btn-start-season').addEventListener('click', startSeason);
+document.getElementById('btn-add-comp').addEventListener('click', addCompetition);
 
-// ─── Init ───
+// --- Init ---
 checkConnection();
 if (loadSession()) {
   onLogin();

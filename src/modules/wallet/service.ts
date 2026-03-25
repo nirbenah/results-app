@@ -1,80 +1,98 @@
 /**
  * Wallet service — business logic for virtual credit balances.
- *
  * All mutations are append-only inserts into wallet_transactions.
+ * All balances are per-group.
  */
 
 import { getDb } from '../../shared/db';
 import { BadRequestError } from '../../shared/errors';
 import * as queries from './queries';
 
-const DEFAULT_ENTRY_FEE = 100;
-const DEFAULT_WIN_CREDIT = 200;
+const BET_STAKE = 100;
+const INITIAL_BALANCE = 1000;
+const PARTICIPATION_BONUS = 20;
 
 /**
- * Get the current balance for a user.
+ * Get the current balance for a user in a group.
  */
-export async function getBalance(userId: string): Promise<number> {
-  return queries.getBalance(userId);
+export async function getBalance(userId: string, groupId: string): Promise<number> {
+  return queries.getBalance(userId, groupId);
 }
 
 /**
- * Get recent transactions for a user.
+ * Get recent transactions for a user in a group.
  */
 export async function getTransactions(
   userId: string,
+  groupId: string,
   limit = 20
 ): Promise<queries.WalletTransaction[]> {
-  return queries.getTransactions(userId, limit);
+  return queries.getTransactions(userId, groupId, limit);
 }
 
 /**
- * Credit a user's wallet after winning a bet.
+ * Credit initial balance (1000 credits) when a user joins a betting-format group.
  */
-export async function creditWin(
+export async function creditInitialBalance(
   userId: string,
-  seasonId: string,
-  betId: string,
-  amount: number = DEFAULT_WIN_CREDIT
+  groupId: string
 ): Promise<queries.WalletTransaction> {
   return queries.insertTransaction({
     user_id: userId,
-    season_id: seasonId,
-    type: 'bet_win',
-    amount,
+    group_id: groupId,
+    type: 'initial_balance',
+    amount: INITIAL_BALANCE,
+    direction: 'credit',
+  });
+}
+
+/**
+ * Credit participation bonus (20 credits) for placing a bet.
+ */
+export async function creditParticipationBonus(
+  userId: string,
+  groupId: string,
+  betId: string
+): Promise<queries.WalletTransaction> {
+  return queries.insertTransaction({
+    user_id: userId,
+    group_id: groupId,
+    type: 'participation_bonus',
+    amount: PARTICIPATION_BONUS,
     direction: 'credit',
     reference_id: betId,
   });
 }
 
 /**
- * Debit a user's wallet when they place a bet (entry fee).
+ * Debit entry fee when placing a bet (100 credits).
  * Validates sufficient balance before inserting.
  */
 export async function debitEntryFee(
   userId: string,
-  seasonId: string,
-  amount: number = DEFAULT_ENTRY_FEE
+  groupId: string,
+  betId?: string
 ): Promise<queries.WalletTransaction> {
   const db = getDb();
 
   return db.transaction(async (trx) => {
-    const balance = await queries.getBalance(userId, trx);
+    const balance = await queries.getBalance(userId, groupId, trx);
 
-    if (balance < amount) {
+    if (balance < BET_STAKE) {
       throw new BadRequestError(
         'INSUFFICIENT_BALANCE',
-        `Insufficient balance: have ${balance}, need ${amount}`
+        `Insufficient balance: have ${balance}, need ${BET_STAKE}`
       );
     }
 
     return queries.insertTransaction(
       {
         user_id: userId,
-        season_id: seasonId,
+        group_id: groupId,
         type: 'entry_fee',
-        amount,
+        amount: BET_STAKE,
         direction: 'debit',
+        reference_id: betId,
       },
       trx
     );
@@ -82,50 +100,21 @@ export async function debitEntryFee(
 }
 
 /**
- * Distribute season-end payouts to the top 3 ranked users.
- *
- * Payout split:
- *   1st place — 50% of pool
- *   2nd place — 30% of pool
- *   3rd place — 20% of pool
+ * Credit a user's wallet after winning a bet.
+ * Payout = stake × odds.
  */
-export async function distributePayout(
-  seasonId: string,
-  rankings: Array<{ rank: number; user_id: string }>
-): Promise<void> {
-  const db = getDb();
-
-  // Calculate the total pool: sum of all debits for the season
-  const poolResult = await db('wallet_transactions')
-    .where({ season_id: seasonId, direction: 'debit' })
-    .sum('amount as total')
-    .first();
-
-  const pool = Number(poolResult?.total ?? 0);
-  if (pool === 0) return;
-
-  const splits: Record<number, number> = {
-    1: 0.5,
-    2: 0.3,
-    3: 0.2,
-  };
-
-  const top3 = rankings.filter((r) => r.rank >= 1 && r.rank <= 3);
-
-  for (const entry of top3) {
-    const share = splits[entry.rank];
-    if (!share) continue;
-
-    const payout = Math.floor(pool * share);
-    if (payout <= 0) continue;
-
-    await queries.insertTransaction({
-      user_id: entry.user_id,
-      season_id: seasonId,
-      type: 'season_payout',
-      amount: payout,
-      direction: 'credit',
-      reference_id: seasonId,
-    });
-  }
+export async function creditWin(
+  userId: string,
+  groupId: string,
+  betId: string,
+  payout: number
+): Promise<queries.WalletTransaction> {
+  return queries.insertTransaction({
+    user_id: userId,
+    group_id: groupId,
+    type: 'bet_win',
+    amount: payout,
+    direction: 'credit',
+    reference_id: betId,
+  });
 }
