@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Results App</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f1117; color: #e1e1e6; min-height: 100vh; }
+
+  /* Layout */
+  .app { display: flex; flex-direction: column; min-height: 100vh; }
+  .panels { display: flex; flex: 1; gap: 2px; background: #1a1b23; }
+  .panel { flex: 1; padding: 16px; overflow-y: auto; max-height: calc(100vh - 52px); }
+  .panel:first-child { border-right: 2px solid #2a2b35; }
+  .panel-header { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid #2a2b35; }
+  .panel-label { font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 12px; }
+  .p1-color { background: #1e3a5f; color: #60a5fa; }
+  .p2-color { background: #3b1f3b; color: #c084fc; }
+  .panel-username { font-size: 16px; font-weight: 700; }
+  .panel-balance { margin-left: auto; font-size: 14px; font-weight: 600; color: #4ade80; }
+
+  /* Top bar */
+  .topbar { background: #1a1b23; padding: 12px 20px; display: flex; align-items: center; border-bottom: 2px solid #2a2b35; }
+  .topbar h1 { font-size: 18px; font-weight: 700; }
+  .topbar .status { margin-left: auto; font-size: 12px; color: #6b7280; }
+  .topbar .status.connected { color: #4ade80; }
+
+  /* Auth */
+  .auth-box { background: #1e1f2a; border-radius: 10px; padding: 20px; margin-bottom: 16px; }
+  .auth-box h3 { font-size: 14px; margin-bottom: 12px; color: #9ca3af; }
+  .input-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  input { background: #0f1117; border: 1px solid #2a2b35; color: #e1e1e6; padding: 8px 12px; border-radius: 6px; font-size: 13px; flex: 1; outline: none; }
+  input:focus { border-color: #4f6fff; }
+
+  /* Buttons */
+  btn, .btn { display: inline-flex; align-items: center; justify-content: center; padding: 8px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; transition: all 0.15s; }
+  .btn-primary { background: #4f6fff; color: white; }
+  .btn-primary:hover { background: #3d5af1; }
+  .btn-success { background: #059669; color: white; }
+  .btn-success:hover { background: #047857; }
+  .btn-danger { background: #dc2626; color: white; }
+  .btn-danger:hover { background: #b91c1c; }
+  .btn-outline { background: transparent; border: 1px solid #2a2b35; color: #9ca3af; }
+  .btn-outline:hover { border-color: #4f6fff; color: #e1e1e6; }
+  .btn-sm { padding: 5px 10px; font-size: 12px; }
+  .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Cards */
+  .card { background: #1e1f2a; border-radius: 10px; padding: 16px; margin-bottom: 12px; }
+  .card-title { font-size: 14px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 8px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; font-weight: 600; }
+  .badge-open { background: #064e3b; color: #34d399; }
+  .badge-pending { background: #78350f; color: #fbbf24; }
+  .badge-won { background: #064e3b; color: #34d399; }
+  .badge-lost { background: #7f1d1d; color: #fca5a5; }
+  .badge-active { background: #1e3a5f; color: #60a5fa; }
+
+  /* Sections */
+  .section { margin-bottom: 20px; }
+  .section-title { font-size: 13px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px; }
+
+  /* Match card */
+  .match { display: flex; align-items: center; padding: 10px; background: #252636; border-radius: 8px; margin-bottom: 6px; }
+  .match-teams { flex: 1; }
+  .match-teams .home { font-weight: 600; }
+  .match-teams .vs { color: #6b7280; font-size: 12px; margin: 2px 0; }
+  .match-teams .away { font-weight: 600; }
+  .match-time { font-size: 11px; color: #6b7280; }
+  .match-btn { margin-left: 10px; }
+
+  /* Market options */
+  .options { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .option-btn { flex: 1; min-width: 80px; text-align: center; padding: 10px 8px; background: #252636; border: 1px solid #2a2b35; border-radius: 8px; cursor: pointer; transition: all 0.15s; }
+  .option-btn:hover { border-color: #4f6fff; background: #2a2b45; }
+  .option-btn.selected { border-color: #4f6fff; background: #1e2a4a; }
+  .option-label { font-size: 12px; color: #9ca3af; }
+
+  /* Leaderboard */
+  .lb-row { display: flex; align-items: center; padding: 8px 12px; background: #252636; border-radius: 6px; margin-bottom: 4px; }
+  .lb-rank { width: 28px; font-weight: 700; font-size: 16px; }
+  .lb-rank.gold { color: #fbbf24; }
+  .lb-rank.silver { color: #9ca3af; }
+  .lb-rank.bronze { color: #d97706; }
+  .lb-name { flex: 1; font-weight: 600; }
+  .lb-stats { font-size: 12px; color: #6b7280; }
+  .lb-highlight { background: #1e2a4a; border: 1px solid #4f6fff33; }
+
+  /* Transaction */
+  .tx-row { display: flex; justify-content: space-between; padding: 6px 0; border-bottom: 1px solid #2a2b35; font-size: 13px; }
+  .tx-credit { color: #4ade80; }
+  .tx-debit { color: #f87171; }
+
+  /* Log */
+  .log { background: #0a0b10; border-radius: 8px; padding: 10px; max-height: 120px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 11px; margin-top: 12px; }
+  .log-entry { margin-bottom: 2px; color: #6b7280; }
+  .log-entry.error { color: #f87171; }
+  .log-entry.success { color: #4ade80; }
+
+  /* Shared area */
+  .shared { background: #14151f; padding: 12px 20px; border-top: 2px solid #2a2b35; }
+  .shared-inner { max-width: 600px; margin: 0 auto; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; margin-bottom: 12px; }
+  .tab { padding: 6px 14px; font-size: 12px; font-weight: 600; border-radius: 6px; cursor: pointer; color: #6b7280; background: transparent; border: none; }
+  .tab.active { background: #252636; color: #e1e1e6; }
+  .tab:hover { color: #e1e1e6; }
+
+  .hidden { display: none !important; }
+  .loading { color: #6b7280; font-size: 13px; font-style: italic; }
+  .empty { color: #4b5563; font-size: 13px; text-align: center; padding: 20px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="topbar">
+    <h1>Results App</h1>
+    <span class="status" id="conn-status">checking...</span>
+  </div>
+  <div class="panels">
+    <!-- Player 1 Panel -->
+    <div class="panel" id="p1">
+      <div class="panel-header">
+        <span class="panel-label p1-color">Player 1</span>
+        <span class="panel-username" id="p1-name">Not logged in</span>
+        <span class="panel-balance" id="p1-balance"></span>
+      </div>
+      <!-- Auth -->
+      <div id="p1-auth" class="auth-box">
+        <h3>Register or Login</h3>
+        <div class="input-row">
+          <input id="p1-username" placeholder="Username" />
+          <input id="p1-email" placeholder="Email" />
+        </div>
+        <div class="input-row">
+          <input id="p1-password" type="password" placeholder="Password" />
+          <button class="btn btn-primary" onclick="register(1)">Register</button>
+          <button class="btn btn-outline" onclick="login(1)">Login</button>
+        </div>
+      </div>
+      <!-- Content after login -->
+      <div id="p1-content" class="hidden">
+        <div class="tabs">
+          <button class="tab active" onclick="switchTab(1,'matches')">Matches</button>
+          <button class="tab" onclick="switchTab(1,'bets')">My Bets</button>
+          <button class="tab" onclick="switchTab(1,'wallet')">Wallet</button>
+        </div>
+        <div id="p1-tab-matches" class="section"></div>
+        <div id="p1-tab-bets" class="section hidden"></div>
+        <div id="p1-tab-wallet" class="section hidden"></div>
+      </div>
+      <div class="log" id="p1-log"></div>
+    </div>
+
+    <!-- Player 2 Panel -->
+    <div class="panel" id="p2">
+      <div class="panel-header">
+        <span class="panel-label p2-color">Player 2</span>
+        <span class="panel-username" id="p2-name">Not logged in</span>
+        <span class="panel-balance" id="p2-balance"></span>
+      </div>
+      <!-- Auth -->
+      <div id="p2-auth" class="auth-box">
+        <h3>Register or Login</h3>
+        <div class="input-row">
+          <input id="p2-username" placeholder="Username" />
+          <input id="p2-email" placeholder="Email" />
+        </div>
+        <div class="input-row">
+          <input id="p2-password" type="password" placeholder="Password" />
+          <button class="btn btn-primary" onclick="register(2)">Register</button>
+          <button class="btn btn-outline" onclick="login(2)">Login</button>
+        </div>
+      </div>
+      <!-- Content after login -->
+      <div id="p2-content" class="hidden">
+        <div class="tabs">
+          <button class="tab active" onclick="switchTab(2,'matches')">Matches</button>
+          <button class="tab" onclick="switchTab(2,'bets')">My Bets</button>
+          <button class="tab" onclick="switchTab(2,'wallet')">Wallet</button>
+        </div>
+        <div id="p2-tab-matches" class="section"></div>
+        <div id="p2-tab-bets" class="section hidden"></div>
+        <div id="p2-tab-wallet" class="section hidden"></div>
+      </div>
+      <div class="log" id="p2-log"></div>
+    </div>
+  </div>
+
+  <!-- Shared: Group / Season / Leaderboard -->
+  <div class="shared" id="shared-area">
+    <div class="shared-inner">
+      <div id="group-setup" class="card">
+        <div class="card-title">Group & Season Setup</div>
+        <p id="group-setup-msg" class="empty">Both players must be logged in to set up a group.</p>
+        <div id="group-controls" class="hidden">
+          <div class="input-row" style="margin-top:8px;">
+            <input id="group-name" placeholder="Group name" value="The Rivals" />
+            <button class="btn btn-primary" id="btn-create-group" onclick="createGroup()">Create Group</button>
+          </div>
+        </div>
+        <div id="group-info" class="hidden" style="margin-top:10px;"></div>
+        <div id="season-controls" class="hidden" style="margin-top:10px;">
+          <div class="input-row">
+            <select id="comp-select" class="btn btn-outline" style="flex:1;padding:8px;background:#0f1117;color:#e1e1e6;border:1px solid #2a2b35;border-radius:6px;"></select>
+            <button class="btn btn-success" onclick="startSeason()">Start Season</button>
+          </div>
+        </div>
+        <div id="season-info" class="hidden" style="margin-top:10px;"></div>
+      </div>
+      <div id="leaderboard-area" class="card hidden">
+        <div class="card-title">Leaderboard <button class="btn btn-outline btn-sm" onclick="loadLeaderboard()" style="margin-left:auto;">Refresh</button></div>
+        <div id="leaderboard-content"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = 'http://localhost:3000';
+const state = {
+  1: { token: null, userId: null, username: null },
+  2: { token: null, userId: null, username: null },
+  groupId: null,
+  seasonId: null,
+  seasonStatus: null,
+  competitions: [],
+};
+
+// ─── API helper ───
+
+async function api(method, path, body, playerNum) {
+  const headers = { 'Content-Type': 'application/json' };
+  if (playerNum && state[playerNum].token) {
+    headers['Authorization'] = `Bearer ${state[playerNum].token}`;
+  }
+  if (method === 'POST' && path.includes('/bets')) {
+    headers['Idempotency-Key'] = Date.now().toString(36) + Math.random().toString(36).slice(2);
+  }
+  const opts = { method, headers };
+  if (body) opts.body = JSON.stringify(body);
+
+  const res = await fetch(`${API}${path}`, opts);
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw new Error(data.error?.message || `HTTP ${res.status}`);
+  }
+  return data;
+}
+
+// ─── Logging ───
+
+function log(p, msg, type = '') {
+  const el = document.getElementById(`p${p}-log`);
+  const entry = document.createElement('div');
+  entry.className = `log-entry ${type}`;
+  const time = new Date().toLocaleTimeString();
+  entry.textContent = `[${time}] ${msg}`;
+  el.prepend(entry);
+}
+
+// ─── Connection check ───
+
+async function checkConnection() {
+  try {
+    await api('GET', '/health');
+    document.getElementById('conn-status').textContent = 'Connected';
+    document.getElementById('conn-status').className = 'status connected';
+  } catch {
+    document.getElementById('conn-status').textContent = 'Disconnected - is the server running?';
+  }
+}
+
+// ─── Auth ───
+
+async function register(p) {
+  const username = document.getElementById(`p${p}-username`).value.trim();
+  const email = document.getElementById(`p${p}-email`).value.trim();
+  const password = document.getElementById(`p${p}-password`).value.trim();
+  if (!username || !email || !password) return log(p, 'Fill in all fields', 'error');
+
+  try {
+    const data = await api('POST', '/v1/auth/register', { username, email, password });
+    state[p] = { token: data.token, userId: data.user.id, username: data.user.username };
+    log(p, `Registered as ${data.user.username}`, 'success');
+    onLogin(p);
+  } catch (e) {
+    log(p, `Register failed: ${e.message}`, 'error');
+  }
+}
+
+async function login(p) {
+  const email = document.getElementById(`p${p}-email`).value.trim();
+  const password = document.getElementById(`p${p}-password`).value.trim();
+  if (!email || !password) return log(p, 'Fill in email and password', 'error');
+
+  try {
+    const data = await api('POST', '/v1/auth/login', { email, password });
+    state[p] = { token: data.token, userId: data.user.id, username: data.user.username };
+    log(p, `Logged in as ${data.user.username}`, 'success');
+    onLogin(p);
+  } catch (e) {
+    log(p, `Login failed: ${e.message}`, 'error');
+  }
+}
+
+async function onLogin(p) {
+  document.getElementById(`p${p}-auth`).classList.add('hidden');
+  document.getElementById(`p${p}-content`).classList.remove('hidden');
+  document.getElementById(`p${p}-name`).textContent = state[p].username;
+
+  await Promise.all([loadWallet(p), loadMatches(p)]);
+
+  // Check if both logged in
+  if (state[1].token && state[2].token) {
+    document.getElementById('group-setup-msg').classList.add('hidden');
+    document.getElementById('group-controls').classList.remove('hidden');
+    await loadCompetitions();
+  }
+}
+
+// ─── Wallet ───
+
+async function loadWallet(p) {
+  try {
+    const data = await api('GET', '/v1/wallet', null, p);
+    document.getElementById(`p${p}-balance`).textContent = `${data.balance} credits`;
+
+    const container = document.getElementById(`p${p}-tab-wallet`);
+    let html = `<div class="card"><div class="card-title">Balance: ${data.balance} credits</div>`;
+    if (data.transactions.length === 0) {
+      html += '<div class="empty">No transactions yet</div>';
+    } else {
+      for (const tx of data.transactions) {
+        const cls = tx.direction === 'credit' ? 'tx-credit' : 'tx-debit';
+        const sign = tx.direction === 'credit' ? '+' : '-';
+        const label = tx.type.replace(/_/g, ' ');
+        const time = new Date(tx.created_at).toLocaleTimeString();
+        html += `<div class="tx-row"><span>${label} <span style="color:#4b5563;font-size:11px">${time}</span></span><span class="${cls}">${sign}${tx.amount}</span></div>`;
+      }
+    }
+    html += '</div>';
+    container.innerHTML = html;
+  } catch (e) {
+    log(p, `Wallet error: ${e.message}`, 'error');
+  }
+}
+
+// ─── Competitions ───
+
+async function loadCompetitions() {
+  try {
+    const data = await api('GET', '/v1/competitions', null, 1);
+    state.competitions = data.competitions;
+    const select = document.getElementById('comp-select');
+    select.innerHTML = data.competitions.map(c =>
+      `<option value="${c.id}">${c.name} (${c.sport})</option>`
+    ).join('');
+  } catch (e) {
+    log(1, `Failed to load competitions: ${e.message}`, 'error');
+  }
+}
+
+// ─── Matches & Markets ───
+
+async function loadMatches(p) {
+  const container = document.getElementById(`p${p}-tab-matches`);
+  if (!state.competitions.length) {
+    // Load competitions first
+    try {
+      const data = await api('GET', '/v1/competitions', null, p);
+      state.competitions = data.competitions;
+    } catch { return; }
+  }
+
+  let html = '';
+  for (const comp of state.competitions) {
+    try {
+      const data = await api('GET', `/v1/competitions/${comp.id}/matches`, null, p);
+      html += `<div class="section-title">${comp.name}</div>`;
+      for (const m of data.matches) {
+        const kickoff = new Date(m.kickoff_at);
+        const timeStr = kickoff.toLocaleDateString() + ' ' + kickoff.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const isFinished = m.status === 'finished';
+        const statusBadge = isFinished ? '<span class="badge badge-lost">finished</span>' : '<span class="badge badge-open">scheduled</span>';
+        html += `
+          <div class="match" id="match-${p}-${m.id}" style="${isFinished ? 'opacity:0.6' : ''}">
+            <div class="match-teams">
+              <div class="home">${m.home_team}</div>
+              <div class="vs">vs ${statusBadge}</div>
+              <div class="away">${m.away_team}</div>
+            </div>
+            <div style="text-align:right;">
+              <div class="match-time">${timeStr}</div>
+              ${!isFinished ? `
+                <button class="btn btn-outline btn-sm" style="margin-top:4px;" onclick="loadMarkets(${p},'${m.id}')">Bet</button>
+                <button class="btn btn-danger btn-sm" style="margin-top:4px;" onclick="toggleSettle('${p}','${m.id}')">Settle</button>
+              ` : ''}
+            </div>
+          </div>
+          <div id="settle-${p}-${m.id}" class="hidden" style="margin-bottom:6px;margin-left:10px;">
+            <div class="card" style="padding:10px;display:flex;align-items:center;gap:8px;">
+              <span style="font-size:12px;">${m.home_team}</span>
+              <input type="number" id="home-score-${p}-${m.id}" min="0" value="2" style="width:40px;text-align:center;padding:4px;" />
+              <span style="font-size:12px;">-</span>
+              <input type="number" id="away-score-${p}-${m.id}" min="0" value="1" style="width:40px;text-align:center;padding:4px;" />
+              <span style="font-size:12px;">${m.away_team}</span>
+              <button class="btn btn-danger btn-sm" onclick="settleMatch('${p}','${m.id}')">Finish Match</button>
+            </div>
+          </div>
+          <div id="markets-${p}-${m.id}" class="hidden" style="margin-bottom:10px;"></div>
+        `;
+      }
+    } catch (e) {
+      html += `<div class="empty">Error loading matches</div>`;
+    }
+  }
+  container.innerHTML = html || '<div class="empty">No matches available</div>';
+}
+
+async function loadMarkets(p, matchId) {
+  const container = document.getElementById(`markets-${p}-${matchId}`);
+  if (!container.classList.contains('hidden')) {
+    container.classList.add('hidden');
+    return;
+  }
+
+  if (!state.seasonId) {
+    log(p, 'No active season. Create a group and start a season first.', 'error');
+    return;
+  }
+
+  try {
+    const data = await api('GET', `/v1/matches/${matchId}/markets`, null, p);
+    let html = '';
+    for (const market of data.markets) {
+      const typeLabel = market.type.replace(/_/g, ' ');
+      html += `<div class="card" style="margin-left:10px;">
+        <div class="card-title">${typeLabel} <span class="badge badge-open">${market.status}</span></div>
+        <div class="options">`;
+      for (const opt of market.options) {
+        html += `<div class="option-btn" onclick="placeBet(${p},'${opt.id}','${opt.label}',this)">
+          <div class="option-label">${opt.label}</div>
+        </div>`;
+      }
+      html += '</div></div>';
+    }
+    container.innerHTML = html;
+    container.classList.remove('hidden');
+  } catch (e) {
+    log(p, `Markets error: ${e.message}`, 'error');
+  }
+}
+
+// ─── Settle Match ───
+
+function toggleSettle(p, matchId) {
+  const el = document.getElementById(`settle-${p}-${matchId}`);
+  el.classList.toggle('hidden');
+}
+
+async function settleMatch(p, matchId) {
+  const homeScore = parseInt(document.getElementById(`home-score-${p}-${matchId}`).value) || 0;
+  const awayScore = parseInt(document.getElementById(`away-score-${p}-${matchId}`).value) || 0;
+
+  try {
+    const data = await api('POST', `/v1/admin/matches/${matchId}/finish`, {
+      home_score: homeScore,
+      away_score: awayScore,
+    }, p);
+
+    const outcomeText = data.outcome === 'home' ? `${data.home_team} wins!` :
+                        data.outcome === 'away' ? `${data.away_team} wins!` : 'Draw!';
+
+    log(1, `Match settled: ${data.home_team} ${homeScore}-${awayScore} ${data.away_team} (${outcomeText})`, 'success');
+    log(2, `Match settled: ${data.home_team} ${homeScore}-${awayScore} ${data.away_team} (${outcomeText})`, 'success');
+
+    // Refresh everything for both players
+    await Promise.all([
+      loadWallet(1), loadWallet(2),
+      loadBets(1), loadBets(2),
+      loadMatches(1), loadMatches(2),
+      loadLeaderboard(),
+    ]);
+  } catch (e) {
+    log(parseInt(p), `Settle failed: ${e.message}`, 'error');
+  }
+}
+
+// ─── Place Bet ───
+
+async function placeBet(p, optionId, label, el) {
+  if (!state.seasonId) {
+    log(p, 'No active season!', 'error');
+    return;
+  }
+
+  try {
+    const data = await api('POST', '/v1/bets', {
+      season_id: state.seasonId,
+      market_option_id: optionId,
+    }, p);
+
+    el.style.borderColor = '#4ade80';
+    el.style.background = '#064e3b';
+    log(p, `Bet placed: ${label}`, 'success');
+
+    // Refresh wallet, bets, and leaderboard
+    await Promise.all([loadWallet(p), loadBets(p), loadLeaderboard()]);
+  } catch (e) {
+    log(p, `Bet failed: ${e.message}`, 'error');
+  }
+}
+
+// ─── My Bets ───
+
+async function loadBets(p) {
+  if (!state.seasonId) return;
+  const container = document.getElementById(`p${p}-tab-bets`);
+
+  try {
+    const data = await api('GET', `/v1/bets?season_id=${state.seasonId}`, null, p);
+    if (data.bets.length === 0) {
+      container.innerHTML = '<div class="empty">No bets placed yet</div>';
+      return;
+    }
+
+    let html = '';
+    for (const bet of data.bets) {
+      const matchInfo = bet.market.match ? `${bet.market.match.home_team} vs ${bet.market.match.away_team}` : 'Outright';
+      const statusCls = bet.status === 'won' ? 'badge-won' : bet.status === 'lost' ? 'badge-lost' : 'badge-pending';
+      html += `<div class="card">
+        <div class="card-title">${bet.market_option.label} <span class="badge ${statusCls}">${bet.status}</span></div>
+        <div style="font-size:12px;color:#6b7280">${matchInfo} &middot; ${bet.market.type.replace(/_/g,' ')}</div>
+      </div>`;
+    }
+    container.innerHTML = html;
+  } catch (e) {
+    log(p, `Bets error: ${e.message}`, 'error');
+  }
+}
+
+// ─── Group ───
+
+async function createGroup() {
+  const name = document.getElementById('group-name').value.trim();
+  if (!name) return;
+
+  try {
+    // Player 1 creates the group
+    const group = await api('POST', '/v1/groups', { name }, 1);
+    state.groupId = group.id;
+    log(1, `Group "${name}" created`, 'success');
+
+    // Add Player 2 to the group
+    await api('POST', `/v1/groups/${group.id}/members`, { user_id: state[2].userId }, 1);
+    log(1, `Added ${state[2].username} to group`, 'success');
+    log(2, `Joined group "${name}"`, 'success');
+
+    document.getElementById('group-controls').classList.add('hidden');
+    document.getElementById('group-info').classList.remove('hidden');
+    document.getElementById('group-info').innerHTML = `
+      <div style="font-size:14px;font-weight:600;color:#4ade80;">Group: ${name}</div>
+      <div style="font-size:12px;color:#6b7280;">Members: ${state[1].username}, ${state[2].username}</div>
+    `;
+    document.getElementById('season-controls').classList.remove('hidden');
+  } catch (e) {
+    log(1, `Group error: ${e.message}`, 'error');
+  }
+}
+
+// ─── Season ───
+
+async function startSeason() {
+  const compId = document.getElementById('comp-select').value;
+  if (!compId || !state.groupId) return;
+
+  try {
+    const season = await api('POST', `/v1/groups/${state.groupId}/season`, {
+      competition_id: compId,
+      starts_at: '2024-08-17T00:00:00Z',
+      ends_at: '2025-05-25T00:00:00Z',
+    }, 1);
+    state.seasonId = season.id;
+    state.seasonStatus = season.status;
+    log(1, 'Season created (upcoming)', 'success');
+
+    // Activate it
+    await api('PATCH', `/v1/groups/${state.groupId}/season/status`, { status: 'active' }, 1);
+    state.seasonStatus = 'active';
+    log(1, 'Season activated!', 'success');
+    log(2, 'Season is now active - place your bets!', 'success');
+
+    document.getElementById('season-controls').classList.add('hidden');
+    const comp = state.competitions.find(c => c.id === compId);
+    document.getElementById('season-info').classList.remove('hidden');
+    document.getElementById('season-info').innerHTML = `
+      <div style="font-size:14px;font-weight:600;color:#60a5fa;">Season: ${comp?.name || 'Active'} <span class="badge badge-active">active</span></div>
+    `;
+
+    // Show leaderboard
+    document.getElementById('leaderboard-area').classList.remove('hidden');
+    await loadLeaderboard();
+
+    // Reload matches for both players
+    await Promise.all([loadMatches(1), loadMatches(2)]);
+  } catch (e) {
+    log(1, `Season error: ${e.message}`, 'error');
+  }
+}
+
+// ─── Leaderboard ───
+
+async function loadLeaderboard() {
+  if (!state.groupId) return;
+  const container = document.getElementById('leaderboard-content');
+
+  try {
+    const data = await api('GET', `/v1/groups/${state.groupId}/leaderboard`, null, 1);
+
+    if (data.entries.length === 0) {
+      container.innerHTML = '<div class="empty">No entries yet</div>';
+      return;
+    }
+
+    let html = '';
+    for (const entry of data.entries) {
+      const rankCls = entry.rank === 1 ? 'gold' : entry.rank === 2 ? 'silver' : entry.rank === 3 ? 'bronze' : '';
+      const isMe = entry.user.id === state[1].userId || entry.user.id === state[2].userId;
+      const highlight = isMe ? 'lb-highlight' : '';
+      const rankDisplay = entry.rank || '-';
+      const winRate = entry.total_bets > 0 ? Math.round(entry.win_rate * 100) + '%' : '-';
+      const streak = entry.current_streak > 0 ? ` | streak: ${entry.current_streak}` : '';
+
+      html += `<div class="lb-row ${highlight}">
+        <div class="lb-rank ${rankCls}">${rankDisplay}</div>
+        <div class="lb-name">${entry.user.username}</div>
+        <div class="lb-stats">${entry.wins}W ${entry.losses}L (${entry.total_bets} bets) | WR: ${winRate}${streak}</div>
+      </div>`;
+    }
+    container.innerHTML = html;
+  } catch (e) {
+    log(1, `Leaderboard error: ${e.message}`, 'error');
+  }
+}
+
+// ─── Tab switching ───
+
+function switchTab(p, tab) {
+  const tabs = ['matches', 'bets', 'wallet'];
+  for (const t of tabs) {
+    document.getElementById(`p${p}-tab-${t}`).classList.toggle('hidden', t !== tab);
+  }
+  // Update active tab button
+  const panel = document.getElementById(`p${p}`);
+  panel.querySelectorAll('.tab').forEach((btn, i) => {
+    btn.classList.toggle('active', tabs[i] === tab);
+  });
+
+  // Load data when switching
+  if (tab === 'bets') loadBets(p);
+  if (tab === 'wallet') loadWallet(p);
+  if (tab === 'matches') loadMatches(p);
+}
+
+// ─── Init ───
+checkConnection();
+</script>
+</body>
+</html>
