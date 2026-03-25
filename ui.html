@@ -18,10 +18,15 @@
   .topbar .status.connected { color: #4ade80; }
 
   /* User bar */
-  .userbar { background: #1a1b23; padding: 10px 20px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #2a2b35; }
+  .userbar { background: #1a1b23; padding: 10px 20px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #2a2b35; flex-wrap: wrap; }
   .userbar-name { font-weight: 700; font-size: 15px; }
   .userbar-balance { margin-left: auto; font-weight: 600; color: #4ade80; font-size: 14px; }
   .userbar .btn-sm { font-size: 11px; padding: 3px 8px; }
+
+  /* Group selector */
+  .group-selector { width: 100%; margin-top: 6px; }
+  .group-selector select { width: 100%; background: #252636; border: 1px solid #2a2b35; color: #e1e1e6; padding: 8px 10px; border-radius: 8px; font-size: 13px; }
+  .group-selector select:focus { border-color: #4f6fff; outline: none; }
 
   /* Content */
   .content { flex: 1; padding: 16px; overflow-y: auto; }
@@ -59,6 +64,7 @@
   .badge-lost { background: #7f1d1d; color: #fca5a5; }
   .badge-active { background: #1e3a5f; color: #60a5fa; }
   .badge-scheduled { background: #1e1f2a; color: #6b7280; border: 1px solid #2a2b35; }
+  .badge-commissioner { background: #4c1d95; color: #c4b5fd; }
 
   /* Section */
   .section { margin-bottom: 20px; }
@@ -108,12 +114,12 @@
   .settle-row { display: flex; align-items: center; gap: 8px; }
   .score-input { width: 50px; text-align: center; padding: 8px; font-size: 16px; font-weight: 700; }
 
-  /* Group setup card */
-  .setup-step { background: #252636; border-radius: 10px; padding: 16px; margin-bottom: 12px; }
-  .setup-step h4 { font-size: 14px; margin-bottom: 10px; }
-  .setup-step.done { opacity: 0.5; }
-  .step-number { display: inline-flex; width: 24px; height: 24px; border-radius: 50%; background: #4f6fff; color: white; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; margin-right: 8px; }
-  .step-number.done { background: #059669; }
+  /* Group card in list */
+  .group-card { background: #252636; border: 1px solid #2a2b35; border-radius: 10px; padding: 14px; margin-bottom: 8px; cursor: pointer; transition: all 0.15s; }
+  .group-card:hover { border-color: #4f6fff; }
+  .group-card.active { border-color: #4ade80; background: #0f2e1e; }
+  .group-card-name { font-weight: 700; font-size: 15px; }
+  .group-card-meta { font-size: 12px; color: #6b7280; margin-top: 4px; }
 
   /* Competition chips */
   .comp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
@@ -132,6 +138,10 @@
 
   /* Invite link */
   .invite-box { background: #0f1117; border: 1px solid #2a2b35; border-radius: 8px; padding: 10px; font-size: 12px; color: #9ca3af; word-break: break-all; margin-top: 8px; }
+
+  /* No group notice */
+  .no-group-notice { background: #1e1f2a; border: 1px dashed #4f6fff; border-radius: 10px; padding: 20px; text-align: center; margin-bottom: 16px; }
+  .no-group-notice p { font-size: 14px; color: #9ca3af; margin-bottom: 10px; }
 </style>
 </head>
 <body>
@@ -146,6 +156,12 @@
     <span class="userbar-name" id="user-name"></span>
     <span class="userbar-balance" id="user-balance"></span>
     <button class="btn btn-outline btn-sm" id="btn-logout">Logout</button>
+    <!-- Group selector -->
+    <div class="group-selector" id="group-selector-wrap">
+      <select id="group-select">
+        <option value="">-- No group selected --</option>
+      </select>
+    </div>
   </div>
 
   <div class="content">
@@ -174,9 +190,9 @@
 
     <!-- MATCHES SCREEN -->
     <div id="screen-matches" class="hidden">
-      <div id="group-banner" class="card hidden">
-        <div style="font-size:14px;font-weight:600;color:#4ade80;" id="group-banner-name"></div>
-        <div style="font-size:12px;color:#6b7280;" id="group-banner-info"></div>
+      <div id="no-group-matches" class="no-group-notice hidden">
+        <p>Create or join a group to start betting!</p>
+        <button class="btn btn-primary btn-sm" onclick="showScreen('group')">Go to Groups</button>
       </div>
       <div id="matches-list"></div>
     </div>
@@ -190,7 +206,7 @@
     <!-- LEADERBOARD SCREEN -->
     <div id="screen-leaderboard" class="hidden">
       <div class="section-title">Leaderboard</div>
-      <div id="leaderboard-list"><div class="empty">Join a group to see the leaderboard</div></div>
+      <div id="leaderboard-list"><div class="empty">Select a group to see the leaderboard</div></div>
     </div>
 
     <!-- WALLET SCREEN -->
@@ -204,39 +220,42 @@
       <div id="wallet-transactions"></div>
     </div>
 
-    <!-- GROUP SCREEN -->
+    <!-- GROUPS SCREEN -->
     <div id="screen-group" class="hidden">
-      <div class="section-title">Group Management</div>
+      <div class="section-title">My Groups</div>
+      <div id="my-groups-list"></div>
 
-      <!-- No group yet -->
-      <div id="group-none">
-        <div class="setup-step">
-          <h4><span class="step-number">1</span> Create or Join a Group</h4>
-          <div class="form-group">
-            <input id="new-group-name" placeholder="Group name (e.g. The Rivals)" />
-          </div>
-          <div class="form-group">
-            <label>Scoring Format</label>
-            <select id="scoring-format">
-              <option value="betting">Betting (1000 credits, stake x odds)</option>
-              <option value="points">Points (3/2/1 per correct bet)</option>
-            </select>
-          </div>
-          <div class="form-group">
-            <label>Select Competitions</label>
-            <div class="comp-chips" id="comp-chips-create"></div>
-          </div>
-          <button class="btn btn-primary btn-block" id="btn-create-group">Create Group</button>
-          <div style="text-align:center;color:#6b7280;font-size:12px;margin:12px 0;">--- or ---</div>
-          <div class="form-group">
-            <input id="join-group-id" placeholder="Paste group invite code" />
-          </div>
-          <button class="btn btn-outline btn-block" id="btn-join-group">Join Group</button>
+      <!-- Create / join -->
+      <div class="card" style="margin-top:16px;">
+        <div class="card-title">Create a New Group</div>
+        <div class="form-group">
+          <input id="new-group-name" placeholder="Group name (e.g. The Rivals)" />
         </div>
+        <div class="form-group">
+          <label>Scoring Format</label>
+          <select id="scoring-format">
+            <option value="betting">Betting (1000 credits, stake x odds)</option>
+            <option value="points">Points (3/2/1 per correct bet)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Select Competitions</label>
+          <div class="comp-chips" id="comp-chips-create"></div>
+        </div>
+        <button class="btn btn-primary btn-block" id="btn-create-group">Create Group</button>
       </div>
 
-      <!-- Has group -->
-      <div id="group-active" class="hidden">
+      <div class="card">
+        <div class="card-title">Join a Group</div>
+        <div class="form-group">
+          <input id="join-group-id" placeholder="Paste group invite code" />
+        </div>
+        <button class="btn btn-outline btn-block" id="btn-join-group">Join Group</button>
+      </div>
+
+      <!-- Active group details (shown when a group is selected) -->
+      <div id="group-detail-section" class="hidden">
+        <div class="section-title" style="margin-top:16px;">Selected Group Details</div>
         <div class="card">
           <div class="card-title" id="group-detail-name"></div>
           <div style="font-size:12px;color:#6b7280;" id="group-detail-info"></div>
@@ -268,7 +287,7 @@
     <button class="nav-item" data-screen="bets"><span class="nav-icon">&#127922;</span>Bets</button>
     <button class="nav-item" data-screen="leaderboard"><span class="nav-icon">&#127942;</span>Board</button>
     <button class="nav-item" data-screen="wallet"><span class="nav-icon">&#128176;</span>Wallet</button>
-    <button class="nav-item" data-screen="group"><span class="nav-icon">&#9881;</span>Group</button>
+    <button class="nav-item" data-screen="group"><span class="nav-icon">&#9881;</span>Groups</button>
   </div>
 </div>
 
@@ -284,9 +303,8 @@ var state = {
   token: null,
   userId: null,
   username: null,
-  groupId: null,
-  scoringFormat: null,
-  isCommissioner: false,
+  groups: [],          // array of {id, name, scoring_format, role, member_count, status}
+  activeGroupId: null, // currently selected group
   competitions: [],
   currentScreen: 'matches',
 };
@@ -297,9 +315,7 @@ function saveSession() {
     token: state.token,
     userId: state.userId,
     username: state.username,
-    groupId: state.groupId,
-    scoringFormat: state.scoringFormat,
-    isCommissioner: state.isCommissioner,
+    activeGroupId: state.activeGroupId,
   }));
 }
 
@@ -307,7 +323,10 @@ function loadSession() {
   try {
     var saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
     if (saved && saved.token) {
-      Object.assign(state, saved);
+      state.token = saved.token;
+      state.userId = saved.userId;
+      state.username = saved.username;
+      state.activeGroupId = saved.activeGroupId;
       return true;
     }
   } catch (e) {}
@@ -319,9 +338,13 @@ function clearSession() {
   state.token = null;
   state.userId = null;
   state.username = null;
-  state.groupId = null;
-  state.scoringFormat = null;
-  state.isCommissioner = false;
+  state.groups = [];
+  state.activeGroupId = null;
+}
+
+function getActiveGroup() {
+  if (!state.activeGroupId) return null;
+  return state.groups.find(function(g) { return g.id === state.activeGroupId; }) || null;
 }
 
 // --- API helper ---
@@ -432,22 +455,149 @@ async function onLogin() {
 
   await Promise.all([
     loadCompetitions(),
-    loadGroupState(),
+    loadMyGroups(),
+  ]);
+
+  // If we had an active group, refresh its data
+  if (state.activeGroupId) {
+    await refreshActiveGroupData();
+  } else {
+    updateNoGroupNotice();
+    loadMatches();
+  }
+}
+
+// --- Groups ---
+async function loadMyGroups() {
+  try {
+    var data = await api('GET', '/v1/groups');
+    state.groups = data.groups;
+    renderGroupSelector();
+    renderMyGroupsList();
+
+    // Auto-select first group if none selected and groups exist
+    if (!state.activeGroupId && state.groups.length > 0) {
+      selectGroup(state.groups[0].id);
+    }
+    // If active group no longer exists in list, clear it
+    if (state.activeGroupId && !getActiveGroup()) {
+      state.activeGroupId = null;
+      saveSession();
+      renderGroupSelector();
+      updateNoGroupNotice();
+    }
+  } catch (e) {
+    console.error('Groups error:', e);
+  }
+}
+
+function renderGroupSelector() {
+  var select = document.getElementById('group-select');
+  var html = '<option value="">-- Select a group --</option>';
+  for (var i = 0; i < state.groups.length; i++) {
+    var g = state.groups[i];
+    var sel = g.id === state.activeGroupId ? ' selected' : '';
+    var icon = g.role === 'commissioner' ? ' [C]' : '';
+    html += '<option value="' + g.id + '"' + sel + '>' + g.name + icon + ' (' + g.member_count + ' members)</option>';
+  }
+  select.innerHTML = html;
+
+  // Hide selector if no groups
+  document.getElementById('group-selector-wrap').classList.toggle('hidden', state.groups.length === 0);
+}
+
+function renderMyGroupsList() {
+  var container = document.getElementById('my-groups-list');
+  if (state.groups.length === 0) {
+    container.innerHTML = '<div class="empty">You haven\'t joined any groups yet. Create one or join with a code!</div>';
+    return;
+  }
+
+  var html = '';
+  for (var i = 0; i < state.groups.length; i++) {
+    var g = state.groups[i];
+    var isActive = g.id === state.activeGroupId;
+    var roleBadge = g.role === 'commissioner' ? ' <span class="badge badge-commissioner">Commissioner</span>' : '';
+    html += '<div class="group-card' + (isActive ? ' active' : '') + '" data-group-id="' + g.id + '">'
+      + '<div class="group-card-name">' + g.name + roleBadge + '</div>'
+      + '<div class="group-card-meta">' + g.scoring_format + ' format | ' + g.member_count + ' members | ' + g.status + '</div>'
+      + '</div>';
+  }
+  container.innerHTML = html;
+
+  container.querySelectorAll('.group-card').forEach(function(card) {
+    card.addEventListener('click', function() {
+      selectGroup(this.dataset.groupId);
+    });
+  });
+}
+
+async function selectGroup(groupId) {
+  state.activeGroupId = groupId;
+  saveSession();
+  renderGroupSelector();
+  renderMyGroupsList();
+  updateNoGroupNotice();
+  await refreshActiveGroupData();
+}
+
+async function refreshActiveGroupData() {
+  if (!state.activeGroupId) return;
+  await Promise.all([
+    loadGroupDetails(),
+    loadWallet(),
     loadMatches(),
   ]);
-  if (state.groupId) {
-    loadWallet();
+}
+
+function updateNoGroupNotice() {
+  var el = document.getElementById('no-group-matches');
+  if (el) {
+    el.classList.toggle('hidden', !!state.activeGroupId);
+  }
+}
+
+async function loadGroupDetails() {
+  if (!state.activeGroupId) {
+    document.getElementById('group-detail-section').classList.add('hidden');
+    return;
+  }
+
+  try {
+    var data = await api('GET', '/v1/groups/' + state.activeGroupId);
+    var group = getActiveGroup();
+    var isCommissioner = data.commissioner_id === state.userId;
+
+    document.getElementById('group-detail-section').classList.remove('hidden');
+    document.getElementById('group-detail-name').textContent = data.name;
+    document.getElementById('group-detail-info').textContent =
+      data.member_count + ' members | ' + (data.scoring_format || 'betting') + ' format';
+    document.getElementById('group-invite-code').textContent = state.activeGroupId;
+
+    // Render competitions
+    renderGroupCompetitions(data.competitions || [], isCommissioner);
+
+    // Show add competition area for commissioner
+    if (isCommissioner) {
+      document.getElementById('add-comp-area').classList.remove('hidden');
+      renderAddCompSelect(data.competitions || []);
+    } else {
+      document.getElementById('add-comp-area').classList.add('hidden');
+    }
+  } catch (e) {
+    console.error('Group detail error:', e);
   }
 }
 
 // --- Wallet ---
 async function loadWallet() {
-  if (!state.groupId) {
+  if (!state.activeGroupId) {
     document.getElementById('user-balance').textContent = '';
+    document.getElementById('wallet-balance-big').textContent = '0';
     return;
   }
   try {
-    var data = await api('GET', '/v1/wallet?group_id=' + state.groupId);
+    var data = await api('GET', '/v1/wallet?group_id=' + state.activeGroupId);
     document.getElementById('user-balance').textContent = data.balance + ' credits';
     document.getElementById('wallet-balance-big').textContent = data.balance;
 
@@ -496,54 +646,7 @@ function renderCompChips() {
   });
 }
 
-// --- Group state ---
-async function loadGroupState() {
-  if (!state.groupId) {
-    document.getElementById('group-none').classList.remove('hidden');
-    document.getElementById('group-active').classList.add('hidden');
-    document.getElementById('group-banner').classList.add('hidden');
-    return;
-  }
-
-  try {
-    var data = await api('GET', '/v1/groups/' + state.groupId);
-    state.isCommissioner = data.commissioner_id === state.userId;
-    state.scoringFormat = data.scoring_format || 'betting';
-
-    document.getElementById('group-none').classList.add('hidden');
-    document.getElementById('group-active').classList.remove('hidden');
-
-    document.getElementById('group-detail-name').textContent = data.name;
-    document.getElementById('group-detail-info').textContent =
-      data.member_count + ' members | ' + (data.scoring_format || 'betting') + ' format';
-    document.getElementById('group-invite-code').textContent = state.groupId;
-
-    // Group banner on matches screen
-    document.getElementById('group-banner').classList.remove('hidden');
-    document.getElementById('group-banner-name').textContent = data.name;
-    document.getElementById('group-banner-info').textContent =
-      (data.scoring_format || 'betting') + ' format | ' + data.member_count + ' members';
-
-    // Render competitions
-    renderGroupCompetitions(data.competitions || []);
-
-    // Show add competition area for commissioner
-    if (state.isCommissioner) {
-      document.getElementById('add-comp-area').classList.remove('hidden');
-      renderAddCompSelect(data.competitions || []);
-    } else {
-      document.getElementById('add-comp-area').classList.add('hidden');
-    }
-
-    saveSession();
-  } catch (e) {
-    state.groupId = null;
-    saveSession();
-    loadGroupState();
-  }
-}
-
-function renderGroupCompetitions(groupComps) {
+function renderGroupCompetitions(groupComps, isCommissioner) {
   var container = document.getElementById('group-competitions-list');
   if (groupComps.length === 0) {
     container.innerHTML = '<div class="empty">No competitions added yet</div>';
@@ -554,21 +657,20 @@ function renderGroupCompetitions(groupComps) {
     var c = groupComps[i];
     var name = c.name || c.competition_id;
     html += '<div class="comp-chip">' + name;
-    if (state.isCommissioner) {
-      html += ' <span class="remove" data-comp-id="' + c.competition_id + '">x</span>';
+    if (isCommissioner) {
+      html += ' <span class="remove" data-comp-id="' + (c.competition_id || c.id) + '">x</span>';
     }
     html += '</div>';
   }
   container.innerHTML = html;
 
-  // Attach remove listeners
   container.querySelectorAll('.remove').forEach(function(btn) {
     btn.addEventListener('click', function() { removeCompetition(this.dataset.compId); });
   });
 }
 
 function renderAddCompSelect(currentComps) {
-  var currentIds = currentComps.map(function(c) { return c.competition_id; });
+  var currentIds = currentComps.map(function(c) { return c.competition_id || c.id; });
   var available = state.competitions.filter(function(c) { return currentIds.indexOf(c.id) === -1; });
   var select = document.getElementById('add-comp-select');
   if (available.length === 0) {
@@ -582,23 +684,23 @@ function renderAddCompSelect(currentComps) {
 
 async function addCompetition() {
   var compId = document.getElementById('add-comp-select').value;
-  if (!compId || !state.groupId) return;
+  if (!compId || !state.activeGroupId) return;
 
   try {
-    await api('POST', '/v1/groups/' + state.groupId + '/competitions', { competition_id: compId });
+    await api('POST', '/v1/groups/' + state.activeGroupId + '/competitions', { competition_id: compId });
     log('Competition added!', 'success');
-    await loadGroupState();
+    await loadGroupDetails();
   } catch (e) {
     alert('Add competition error: ' + e.message);
   }
 }
 
 async function removeCompetition(compId) {
-  if (!state.groupId) return;
+  if (!state.activeGroupId) return;
   try {
-    await api('DELETE', '/v1/groups/' + state.groupId + '/competitions/' + compId);
+    await api('DELETE', '/v1/groups/' + state.activeGroupId + '/competitions/' + compId);
     log('Competition removed', 'success');
-    await loadGroupState();
+    await loadGroupDetails();
   } catch (e) {
     alert('Remove competition error: ' + e.message);
   }
@@ -607,6 +709,12 @@ async function removeCompetition(compId) {
 // --- Matches ---
 async function loadMatches() {
   var container = document.getElementById('matches-list');
+  if (!state.activeGroupId) {
+    container.innerHTML = '';
+    updateNoGroupNotice();
+    return;
+  }
+
   if (!state.competitions.length) {
     try {
       var data = await api('GET', '/v1/competitions');
@@ -619,6 +727,7 @@ async function loadMatches() {
     var comp = state.competitions[c];
     try {
       var data = await api('GET', '/v1/competitions/' + comp.id + '/matches');
+      if (!data.matches || data.matches.length === 0) continue;
       html += '<div class="section-title">' + comp.name + '</div>';
       for (var m = 0; m < data.matches.length; m++) {
         var match = data.matches[m];
@@ -653,7 +762,6 @@ async function loadMatches() {
   }
   container.innerHTML = html || '<div class="empty">No matches available</div>';
 
-  // Attach event listeners
   container.querySelectorAll('[data-action="bet"]').forEach(function(btn) {
     btn.addEventListener('click', function() { toggleMarkets(this.dataset.match); });
   });
@@ -669,8 +777,8 @@ async function toggleMarkets(matchId) {
     return;
   }
 
-  if (!state.groupId) {
-    alert('Join or create a group first (Group tab).');
+  if (!state.activeGroupId) {
+    alert('Select a group first (Groups tab).');
     return;
   }
 
@@ -685,7 +793,7 @@ async function toggleMarkets(matchId) {
         + '<div class="options">';
       for (var j = 0; j < market.options.length; j++) {
         var opt = market.options[j];
-        var oddsText = opt.odds ? opt.odds.toFixed(1) : '-';
+        var oddsText = opt.odds ? Number(opt.odds).toFixed(1) : '-';
         html += '<div class="option-btn" data-action="place-bet" data-option="' + opt.id + '" data-label="' + opt.label + '">'
           + '<div class="option-label">' + opt.label + '</div>'
           + '<div class="option-odds">' + oddsText + '</div>'
@@ -705,14 +813,14 @@ async function toggleMarkets(matchId) {
 }
 
 async function placeBet(optionId, label, el) {
-  if (!state.groupId) {
-    alert('Join or create a group first!');
+  if (!state.activeGroupId) {
+    alert('Select a group first!');
     return;
   }
 
   try {
     await api('POST', '/v1/bets', {
-      group_id: state.groupId,
+      group_id: state.activeGroupId,
       market_option_id: optionId,
     });
 
@@ -775,13 +883,16 @@ async function doSettle(matchId) {
 
 // --- Bets ---
 async function loadBets() {
-  if (!state.groupId) return;
+  if (!state.activeGroupId) {
+    document.getElementById('bets-list').innerHTML = '<div class="empty">Select a group to see your bets</div>';
+    return;
+  }
   var container = document.getElementById('bets-list');
 
   try {
-    var data = await api('GET', '/v1/bets?group_id=' + state.groupId);
+    var data = await api('GET', '/v1/bets?group_id=' + state.activeGroupId);
     if (data.bets.length === 0) {
-      container.innerHTML = '<div class="empty">No bets placed yet</div>';
+      container.innerHTML = '<div class="empty">No bets placed yet in this group</div>';
       return;
     }
 
@@ -804,11 +915,14 @@ async function loadBets() {
 
 // --- Leaderboard ---
 async function loadLeaderboard() {
-  if (!state.groupId) return;
+  if (!state.activeGroupId) {
+    document.getElementById('leaderboard-list').innerHTML = '<div class="empty">Select a group to see the leaderboard</div>';
+    return;
+  }
   var container = document.getElementById('leaderboard-list');
 
   try {
-    var data = await api('GET', '/v1/groups/' + state.groupId + '/leaderboard');
+    var data = await api('GET', '/v1/groups/' + state.activeGroupId + '/leaderboard');
 
     if (data.entries.length === 0) {
       container.innerHTML = '<div class="empty">No entries yet</div>';
@@ -844,7 +958,6 @@ async function createGroup() {
 
   var scoringFormat = document.getElementById('scoring-format').value;
 
-  // Get selected competition IDs
   var selectedChips = document.querySelectorAll('#comp-chips-create .comp-chip.selected');
   var competitionIds = [];
   selectedChips.forEach(function(chip) {
@@ -857,12 +970,15 @@ async function createGroup() {
       scoring_format: scoringFormat,
       competition_ids: competitionIds,
     });
-    state.groupId = group.id;
-    state.scoringFormat = scoringFormat;
-    state.isCommissioner = true;
-    saveSession();
     log('Group "' + name + '" created!', 'success');
-    await Promise.all([loadGroupState(), loadWallet()]);
+
+    // Clear the form
+    document.getElementById('new-group-name').value = '';
+    document.querySelectorAll('#comp-chips-create .comp-chip.selected').forEach(function(c) { c.classList.remove('selected'); });
+
+    // Reload groups and auto-select the new one
+    await loadMyGroups();
+    await selectGroup(group.id);
   } catch (e) {
     alert('Group error: ' + e.message);
   }
@@ -874,14 +990,32 @@ async function joinGroup() {
 
   try {
     await api('POST', '/v1/groups/' + groupId + '/join');
-    state.groupId = groupId;
-    saveSession();
     log('Joined group!', 'success');
-    await Promise.all([loadGroupState(), loadWallet()]);
+
+    document.getElementById('join-group-id').value = '';
+
+    // Reload groups and auto-select the joined one
+    await loadMyGroups();
+    await selectGroup(groupId);
   } catch (e) {
     alert('Join error: ' + e.message);
   }
 }
+
+// --- Group selector change ---
+document.getElementById('group-select').addEventListener('change', function() {
+  var val = this.value;
+  if (val) {
+    selectGroup(val);
+  } else {
+    state.activeGroupId = null;
+    saveSession();
+    renderMyGroupsList();
+    updateNoGroupNotice();
+    document.getElementById('user-balance').textContent = '';
+    document.getElementById('group-detail-section').classList.add('hidden');
+  }
+});
 
 // --- Navigation event listeners ---
 document.querySelectorAll('.nav-item').forEach(function(btn) {
@@ -892,7 +1026,7 @@ document.querySelectorAll('.nav-item').forEach(function(btn) {
     if (screen === 'wallet') loadWallet();
     if (screen === 'leaderboard') loadLeaderboard();
     if (screen === 'matches') loadMatches();
-    if (screen === 'group') loadGroupState();
+    if (screen === 'group') { loadMyGroups(); loadGroupDetails(); }
   });
 });
 

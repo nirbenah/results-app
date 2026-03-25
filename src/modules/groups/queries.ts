@@ -315,3 +315,32 @@ export async function isGroupMember(
     .first();
   return !!row;
 }
+
+// ─── My Groups ───
+
+export interface MyGroupRow {
+  id: string;
+  name: string;
+  commissioner_id: string;
+  scoring_format: 'points' | 'betting';
+  status: 'active' | 'finished';
+  role: 'commissioner' | 'member';
+  member_count: number;
+}
+
+export async function findGroupsByUserId(userId: string): Promise<MyGroupRow[]> {
+  const db = getDb();
+  return db('group_members')
+    .join('groups', 'groups.id', 'group_members.group_id')
+    .where('group_members.user_id', userId)
+    .select(
+      'groups.id',
+      'groups.name',
+      'groups.commissioner_id',
+      'groups.scoring_format',
+      'groups.status',
+      'group_members.role',
+      db.raw('(SELECT COUNT(*) FROM group_members gm2 WHERE gm2.group_id = groups.id)::int as member_count')
+    )
+    .orderBy('groups.created_at', 'desc');
+}

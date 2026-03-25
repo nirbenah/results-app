@@ -13,6 +13,21 @@ import {
 } from '../../shared/errors';
 import * as queries from './queries';
 
+// ─── My Groups ───
+
+export async function listMyGroups(userId: string) {
+  const groups = await queries.findGroupsByUserId(userId);
+  return groups.map((g) => ({
+    id: g.id,
+    name: g.name,
+    commissioner_id: g.commissioner_id,
+    scoring_format: g.scoring_format,
+    status: g.status,
+    role: g.role,
+    member_count: g.member_count,
+  }));
+}
+
 // ─── Groups ───
 
 export async function createGroup(

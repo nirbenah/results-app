@@ -3,6 +3,17 @@ import * as service from './service';
 
 const router = Router();
 
+// GET /v1/groups — List my groups
+router.get('/', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.userId!;
+    const groups = await service.listMyGroups(userId);
+    res.status(200).json({ groups });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // POST /v1/groups — Create group
 router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
