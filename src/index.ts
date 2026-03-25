@@ -22,7 +22,17 @@ import { register as registerNotify } from './modules/notify';
 const app = express();
 
 // ─── Global middleware (order matters — matches gateway lifecycle) ───
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrcAttr: ["'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      connectSrc: ["'self'"],
+    },
+  },
+}));
 app.use(cors());
 app.use(express.json());
 app.use(correlationId);
