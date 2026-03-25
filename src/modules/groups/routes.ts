@@ -42,6 +42,21 @@ router.post('/:groupId/members', async (req: Request, res: Response, next: NextF
   }
 });
 
+// POST /v1/groups/:groupId/join — Self-join (no commissioner needed)
+router.post('/:groupId/join', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.userId!;
+    const result = await service.joinGroup(
+      req.params.groupId as string,
+      userId,
+      req.correlationId
+    );
+    res.status(201).json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // DELETE /v1/groups/:groupId/members/:userId — Remove member
 router.delete('/:groupId/members/:userId', async (req: Request, res: Response, next: NextFunction) => {
   try {

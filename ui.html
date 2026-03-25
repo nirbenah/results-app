@@ -784,8 +784,8 @@ async function joinGroup() {
   if (!groupId) return alert('Paste a group invite code');
 
   try {
-    // Try to get group info first (to verify it exists)
-    await api('GET', '/v1/groups/' + groupId);
+    // Actually join the group on the server (adds user as member)
+    await api('POST', '/v1/groups/' + groupId + '/join');
     state.groupId = groupId;
     saveSession();
     log('Joined group!', 'success');

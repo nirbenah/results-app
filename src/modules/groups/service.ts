@@ -111,6 +111,40 @@ export async function addMember(
   return { group_id: member.group_id, user_id: member.user_id, role: member.role };
 }
 
+/**
+ * Self-join: a user joins a group using the group invite code (group ID).
+ * No commissioner approval needed.
+ */
+export async function joinGroup(
+  groupId: string,
+  userId: string,
+  correlationId?: string
+) {
+  const group = await queries.findGroupById(groupId);
+  if (!group) throw new NotFoundError('Group');
+
+  const existing = await queries.findGroupMember(groupId, userId);
+  if (existing) {
+    throw new ConflictError('ALREADY_MEMBER', 'You are already a member of this group');
+  }
+
+  const member = await queries.insertGroupMember({
+    group_id: groupId,
+    user_id: userId,
+    role: 'member',
+  });
+
+  // If there's an active or upcoming season, create a leaderboard entry
+  const season = await queries.findSeasonByGroupId(groupId);
+  if (season && season.status !== 'finished') {
+    await queries.insertLeaderboardEntries([
+      { season_id: season.id, user_id: userId },
+    ]);
+  }
+
+  return { group_id: member.group_id, user_id: member.user_id, role: member.role };
+}
+
 export async function removeMember(
   groupId: string,
   requesterId: string,
