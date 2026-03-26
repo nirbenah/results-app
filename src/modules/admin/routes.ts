@@ -148,7 +148,7 @@ router.delete('/teams/:id', async (req: Request, res: Response, next: NextFuncti
 
 router.post('/players', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { name, team_id, position, photo_url, external_id, sport } = req.body;
+    const { name, team_id, position, photo_url, external_id, sport, goals, assists } = req.body;
     if (!name) {
       throw new BadRequestError('VALIDATION', 'name is required');
     }
@@ -161,6 +161,8 @@ router.post('/players', async (req: Request, res: Response, next: NextFunction) 
         photo_url: photo_url || null,
         external_id: external_id || null,
         sport: sport || 'football',
+        goals: goals || 0,
+        assists: assists || 0,
       })
       .returning('*');
     res.status(201).json(row);
@@ -179,13 +181,15 @@ router.get('/teams/:teamId/players', async (req: Request, res: Response, next: N
 
 router.put('/players/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { name, team_id, position, photo_url, external_id } = req.body;
+    const { name, team_id, position, photo_url, external_id, goals, assists } = req.body;
     const updates: Record<string, unknown> = {};
     if (name !== undefined) updates.name = name;
     if (team_id !== undefined) updates.team_id = team_id;
     if (position !== undefined) updates.position = position;
     if (photo_url !== undefined) updates.photo_url = photo_url;
     if (external_id !== undefined) updates.external_id = external_id;
+    if (goals !== undefined) updates.goals = goals;
+    if (assists !== undefined) updates.assists = assists;
 
     const [row] = await getDb()('players')
       .where('id', req.params.id)

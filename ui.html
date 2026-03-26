@@ -1623,7 +1623,7 @@ async function loadInfoContent(compId) {
       html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
       for (var ti = 0; ti < tData.teams.length; ti++) {
         var team = tData.teams[ti];
-        var logoHtml = team.logo_url ? '<img src="' + team.logo_url + '" style="width:16px;height:16px;margin-right:4px;" />' : '';
+        var logoHtml = team.photo_url ? '<img src="' + team.photo_url + '" style="width:16px;height:16px;margin-right:4px;" />' : '';
         html += '<div class="comp-chip" style="cursor:pointer;" data-action="view-team-players" data-team-id="' + team.id + '" data-team-name="' + team.name + '">' + logoHtml + team.name + '</div>';
       }
       html += '</div>';
@@ -1722,6 +1722,34 @@ async function loadInfoContent(compId) {
       }
     }
   } catch (e) { /* no player data */ }
+
+  // Competition outright markets (winner, top goalscorer bets, etc.)
+  try {
+    var cmData = await api('GET', '/v1/competitions/' + compId + '/markets');
+    if (cmData.markets && cmData.markets.length > 0) {
+      html += '<div class="card"><div class="card-title">Special Bets</div>';
+      for (var ci = 0; ci < cmData.markets.length; ci++) {
+        var cm = cmData.markets[ci];
+        var questionText = cm.question || cm.subtype || cm.type.replace(/_/g, ' ');
+        html += '<div style="background:#252636;border-radius:8px;padding:10px;margin-bottom:8px;">'
+          + '<div style="font-size:13px;font-weight:600;">' + questionText + ' <span class="badge badge-' + (cm.status === 'open' ? 'open' : 'lost') + '">' + cm.status + '</span></div>';
+        if (cm.options && cm.options.length > 0) {
+          html += '<div class="options" style="margin-top:6px;">';
+          for (var cj = 0; cj < cm.options.length; cj++) {
+            var co = cm.options[cj];
+            var coOdds = co.odds ? Number(co.odds).toFixed(1) : '-';
+            html += '<div class="option-btn">'
+              + '<div class="option-label">' + co.label + '</div>'
+              + '<div class="option-odds">' + coOdds + '</div>'
+              + '</div>';
+          }
+          html += '</div>';
+        }
+        html += '</div>';
+      }
+      html += '</div>';
+    }
+  } catch (e) { /* no outright markets */ }
 
   container.innerHTML = html || '<div class="empty">No information available for this competition</div>';
 

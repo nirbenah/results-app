@@ -75,16 +75,16 @@ async function seed() {
 
   // ─── Players (linked to PL teams) ───
   const playerData = [
-    { name: 'Bukayo Saka', team_id: plTeams['Arsenal'].id, position: 'RW' },
-    { name: 'Kai Havertz', team_id: plTeams['Arsenal'].id, position: 'CF' },
-    { name: 'Mohamed Salah', team_id: plTeams['Liverpool'].id, position: 'RW' },
-    { name: 'Erling Haaland', team_id: plTeams['Manchester City'].id, position: 'ST' },
-    { name: 'Cole Palmer', team_id: plTeams['Chelsea'].id, position: 'AM' },
-    { name: 'Bruno Fernandes', team_id: plTeams['Manchester United'].id, position: 'AM' },
-    { name: 'Son Heung-min', team_id: plTeams['Tottenham'].id, position: 'LW' },
-    { name: 'Ollie Watkins', team_id: plTeams['Aston Villa'].id, position: 'ST' },
-    { name: 'Alexander Isak', team_id: plTeams['Newcastle'].id, position: 'ST' },
-    { name: 'Phil Foden', team_id: plTeams['Manchester City'].id, position: 'AM' },
+    { name: 'Bukayo Saka', team_id: plTeams['Arsenal'].id, position: 'RW', goals: 12, assists: 10 },
+    { name: 'Kai Havertz', team_id: plTeams['Arsenal'].id, position: 'CF', goals: 9, assists: 4 },
+    { name: 'Mohamed Salah', team_id: plTeams['Liverpool'].id, position: 'RW', goals: 17, assists: 11 },
+    { name: 'Erling Haaland', team_id: plTeams['Manchester City'].id, position: 'ST', goals: 22, assists: 3 },
+    { name: 'Cole Palmer', team_id: plTeams['Chelsea'].id, position: 'AM', goals: 15, assists: 8 },
+    { name: 'Bruno Fernandes', team_id: plTeams['Manchester United'].id, position: 'AM', goals: 7, assists: 9 },
+    { name: 'Son Heung-min', team_id: plTeams['Tottenham'].id, position: 'LW', goals: 11, assists: 6 },
+    { name: 'Ollie Watkins', team_id: plTeams['Aston Villa'].id, position: 'ST', goals: 13, assists: 7 },
+    { name: 'Alexander Isak', team_id: plTeams['Newcastle'].id, position: 'ST', goals: 16, assists: 4 },
+    { name: 'Phil Foden', team_id: plTeams['Manchester City'].id, position: 'AM', goals: 8, assists: 7 },
   ];
 
   const players = await db('players').insert(playerData).returning('*');

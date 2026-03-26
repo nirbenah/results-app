@@ -201,7 +201,7 @@ router.get(
     try {
       const rows = await (await import('../../shared/db')).getDb()('players')
         .where('team_id', req.params.teamId)
-        .select('id', 'name', 'position', 'photo_url')
+        .select('id', 'name', 'position', 'photo_url', 'goals', 'assists')
         .orderBy('name', 'asc');
       res.json({ players: rows });
     } catch (err) { next(err); }
