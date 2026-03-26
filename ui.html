@@ -161,6 +161,13 @@
   /* Profile avatar */
   .avatar-preview { width: 64px; height: 64px; border-radius: 50%; background: #252636; display: flex; align-items: center; justify-content: center; font-size: 28px; margin: 0 auto 12px; overflow: hidden; }
   .avatar-preview img { width: 100%; height: 100%; object-fit: cover; }
+
+  /* Impersonation toolbar */
+  .impersonate-bar { background: #2d1a4e; padding: 6px 20px; display: flex; align-items: center; gap: 10px; border-bottom: 2px solid #7c3aed; font-size: 13px; }
+  .impersonate-bar label { color: #c4b5fd; font-weight: 600; white-space: nowrap; }
+  .impersonate-bar select { flex: 1; background: #1e1f2a; border: 1px solid #7c3aed; color: #e1e1e6; padding: 5px 8px; border-radius: 6px; font-size: 13px; }
+  .impersonate-bar select:focus { border-color: #a78bfa; outline: none; }
+  .impersonate-bar .imp-indicator { color: #fbbf24; font-weight: 700; font-size: 12px; }
 </style>
 </head>
 <body>
@@ -168,6 +175,15 @@
   <div class="topbar">
     <h1>Results App</h1>
     <span class="status" id="conn-status">checking...</span>
+  </div>
+
+  <!-- Impersonation toolbar (admin only) -->
+  <div class="impersonate-bar hidden" id="impersonate-bar">
+    <label>Play as:</label>
+    <select id="impersonate-select">
+      <option value="">Admin (myself)</option>
+    </select>
+    <span class="imp-indicator hidden" id="imp-indicator">IMPERSONATING</span>
   </div>
 
   <!-- User bar (visible after login) -->
@@ -371,6 +387,12 @@
       <!-- Admin: Users -->
       <div class="card">
         <div class="card-title">Users</div>
+        <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
+          <input id="admin-new-username" placeholder="Username" style="flex:1;min-width:80px;padding:6px 8px;font-size:12px;" />
+          <input id="admin-new-email" placeholder="Email" style="flex:1;min-width:100px;padding:6px 8px;font-size:12px;" />
+          <input id="admin-new-password" placeholder="Password" type="password" style="flex:1;min-width:80px;padding:6px 8px;font-size:12px;" />
+          <button class="btn btn-success btn-sm" id="btn-admin-create-user">+ Add</button>
+        </div>
         <div id="admin-users-list"></div>
       </div>
     </div>
@@ -439,6 +461,9 @@ var state = {
   activeGroupId: null, // currently selected group
   competitions: [],
   currentScreen: 'matches',
+  // Impersonation (admin only)
+  impersonateUserId: null,  // null = playing as myself (admin), string = target user id
+  allUsers: [],             // cached user list for the toolbar
 };
 
 // --- Persistence ---
@@ -472,6 +497,8 @@ function clearSession() {
   state.username = null;
   state.groups = [];
   state.activeGroupId = null;
+  state.impersonateUserId = null;
+  state.allUsers = [];
 }
 
 function getActiveGroup() {
@@ -484,6 +511,10 @@ async function api(method, path, body) {
   var headers = { 'Content-Type': 'application/json' };
   if (state.token) {
     headers['Authorization'] = 'Bearer ' + state.token;
+  }
+  // Send impersonation header if admin is playing as another user
+  if (state.impersonateUserId) {
+    headers['X-Impersonate-User'] = state.impersonateUserId;
   }
   var opts = { method: method, headers: headers };
   if (body) opts.body = JSON.stringify(body);
@@ -578,6 +609,9 @@ async function doLogin() {
 
 function doLogout() {
   clearSession();
+  document.getElementById('impersonate-bar').classList.add('hidden');
+  document.getElementById('imp-indicator').classList.add('hidden');
+  document.getElementById('impersonate-select').value = '';
   showScreen('auth');
 }
 
@@ -592,6 +626,12 @@ async function onLogin() {
     // Show/hide admin tab
     var adminNav = document.getElementById('nav-admin');
     if (adminNav) adminNav.classList.toggle('hidden', state.userRole !== 'admin');
+    // Show/hide impersonation toolbar for admins
+    var impBar = document.getElementById('impersonate-bar');
+    if (impBar) impBar.classList.toggle('hidden', state.userRole !== 'admin');
+    if (state.userRole === 'admin') {
+      loadImpersonationUsers();
+    }
   } catch (e) {
     console.error('Profile fetch error:', e);
   }
@@ -608,6 +648,71 @@ async function onLogin() {
     updateNoGroupNotice();
     loadMatches();
   }
+}
+
+// --- Impersonation (admin only) ---
+async function loadImpersonationUsers() {
+  try {
+    // This calls admin endpoint — impersonation header is NOT sent for admin routes
+    // because the backend's requireAdmin middleware resets userId to realUserId
+    var savedImp = state.impersonateUserId;
+    state.impersonateUserId = null; // temporarily clear so admin endpoint works
+    var data = await api('GET', '/v1/admin/users');
+    state.impersonateUserId = savedImp; // restore
+    state.allUsers = data.users || [];
+
+    var select = document.getElementById('impersonate-select');
+    select.innerHTML = '<option value="">Admin (myself)</option>';
+    for (var i = 0; i < state.allUsers.length; i++) {
+      var u = state.allUsers[i];
+      var opt = document.createElement('option');
+      opt.value = u.id;
+      opt.textContent = u.username + ' (' + u.email + ')' + (u.role === 'admin' ? ' [ADMIN]' : '');
+      if (u.id === state.impersonateUserId) opt.selected = true;
+      select.appendChild(opt);
+    }
+  } catch (e) {
+    console.error('Failed to load users for impersonation:', e);
+  }
+}
+
+async function switchImpersonation(targetUserId) {
+  state.impersonateUserId = targetUserId || null;
+
+  var indicator = document.getElementById('imp-indicator');
+  if (state.impersonateUserId) {
+    var targetUser = state.allUsers.find(function(u) { return u.id === state.impersonateUserId; });
+    indicator.textContent = 'Playing as: ' + (targetUser ? targetUser.username : 'User');
+    indicator.classList.remove('hidden');
+    // Update display name
+    document.getElementById('user-name').textContent = targetUser ? targetUser.username : 'User';
+  } else {
+    indicator.classList.add('hidden');
+    document.getElementById('user-name').textContent = state.username;
+  }
+
+  // Clear group selection and reload everything as the new user
+  state.groups = [];
+  state.activeGroupId = null;
+
+  await Promise.all([
+    loadCompetitions(),
+    loadMyGroups(),
+  ]);
+
+  if (state.activeGroupId) {
+    await refreshActiveGroupData();
+  } else {
+    updateNoGroupNotice();
+    loadMatches();
+  }
+
+  // If on a screen that shows user-specific data, refresh it
+  var screen = state.currentScreen;
+  if (screen === 'bets') loadMyBets();
+  if (screen === 'wallet') loadWallet();
+  if (screen === 'leaderboard') loadLeaderboard();
+  if (screen === 'profile') loadProfile();
 }
 
 // --- Groups ---
@@ -1466,11 +1571,16 @@ async function loadAdminUsers() {
     for (var i = 0; i < data.users.length; i++) {
       var u = data.users[i];
       var roleBadge = u.role === 'admin' ? '<span class="badge badge-admin">admin</span>' : u.role;
-      var toggleBtn = u.id !== state.userId
-        ? '<button class="btn btn-outline btn-sm" data-action="toggle-role" data-id="' + u.id + '" data-role="' + u.role + '">'
-          + (u.role === 'admin' ? 'Demote' : 'Promote') + '</button>'
-        : '';
-      html += '<tr><td>' + u.username + '</td><td style="font-size:11px;">' + u.email + '</td><td>' + roleBadge + '</td><td>' + toggleBtn + '</td></tr>';
+      var isSelf = u.id === state.userId;
+      var actions = '';
+      if (!isSelf) {
+        actions += '<button class="btn btn-outline btn-sm" data-action="toggle-role" data-id="' + u.id + '" data-role="' + u.role + '">'
+          + (u.role === 'admin' ? 'Demote' : 'Promote') + '</button> ';
+        actions += '<button class="btn btn-danger btn-sm" data-action="delete-user" data-id="' + u.id + '" data-name="' + u.username + '">Del</button>';
+      } else {
+        actions = '<span style="font-size:11px;color:#6b7280;">you</span>';
+      }
+      html += '<tr><td>' + u.username + '</td><td style="font-size:11px;">' + u.email + '</td><td>' + roleBadge + '</td><td>' + actions + '</td></tr>';
     }
     html += '</table>';
     container.innerHTML = html;
@@ -1479,10 +1589,40 @@ async function loadAdminUsers() {
         var newRole = this.dataset.role === 'admin' ? 'user' : 'admin';
         await api('PUT', '/v1/admin/users/' + this.dataset.id + '/role', { role: newRole });
         loadAdminUsers();
+        loadImpersonationUsers();
+      });
+    });
+    container.querySelectorAll('[data-action="delete-user"]').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        if (!confirm('Delete user "' + this.dataset.name + '"? This removes all their bets, wallet, and group memberships.')) return;
+        try {
+          await api('DELETE', '/v1/admin/users/' + this.dataset.id);
+          loadAdminUsers();
+          loadImpersonationUsers();
+        } catch (e) {
+          alert('Delete error: ' + e.message);
+        }
       });
     });
   } catch (e) {
     console.error('Admin users error:', e);
+  }
+}
+
+async function adminCreateUser() {
+  var username = document.getElementById('admin-new-username').value.trim();
+  var email = document.getElementById('admin-new-email').value.trim();
+  var password = document.getElementById('admin-new-password').value.trim();
+  if (!username || !email || !password) return alert('Fill in all fields');
+  try {
+    await api('POST', '/v1/admin/users', { username: username, email: email, password: password });
+    document.getElementById('admin-new-username').value = '';
+    document.getElementById('admin-new-email').value = '';
+    document.getElementById('admin-new-password').value = '';
+    loadAdminUsers();
+    loadImpersonationUsers();
+  } catch (e) {
+    alert('Create user error: ' + e.message);
   }
 }
 
@@ -1865,6 +2005,10 @@ document.getElementById('admin-match-comp').addEventListener('change', function(
 document.getElementById('info-comp-select').addEventListener('change', function() {
   loadInfoContent(this.value);
 });
+document.getElementById('impersonate-select').addEventListener('change', function() {
+  switchImpersonation(this.value);
+});
+document.getElementById('btn-admin-create-user').addEventListener('click', adminCreateUser);
 
 // --- Init ---
 checkConnection();

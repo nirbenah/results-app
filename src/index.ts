@@ -9,6 +9,7 @@ import {
   requestLogger,
   rateLimiter,
   authenticate,
+  impersonate,
   errorHandler,
 } from './gateway';
 
@@ -52,6 +53,9 @@ app.get('/ui', (_req, res) => {
 
 // ─── Auth middleware (everything below requires a token) ───
 app.use(authenticate);
+
+// ─── Impersonation (admin can play as any user) ───
+app.use(impersonate);
 
 // ─── Mount v1 routes ───
 app.use('/v1', authRouter);

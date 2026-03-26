@@ -607,6 +607,22 @@ router.get('/users', async (_req: Request, res: Response, next: NextFunction) =>
   } catch (err) { next(err); }
 });
 
+// Create user (admin convenience — for quick testing)
+router.post('/users', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const { username, email, password } = req.body;
+    if (!username || !email || !password) {
+      throw new BadRequestError('VALIDATION', 'username, email, and password are required');
+    }
+    const bcrypt = await import('bcryptjs');
+    const passwordHash = await bcrypt.hash(password, 10);
+    const [row] = await getDb()('users')
+      .insert({ username, email, password_hash: passwordHash, role: 'user' })
+      .returning(['id', 'username', 'email', 'role', 'created_at']);
+    res.status(201).json(row);
+  } catch (err) { next(err); }
+});
+
 router.put('/users/:id/role', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { role } = req.body;
@@ -619,6 +635,29 @@ router.put('/users/:id/role', async (req: Request, res: Response, next: NextFunc
       .returning(['id', 'username', 'email', 'role']);
     if (!row) throw new NotFoundError('User');
     res.json(row);
+  } catch (err) { next(err); }
+});
+
+// Delete user (admin convenience — also removes group memberships, bets, wallet transactions)
+router.delete('/users/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.params.id;
+    // Prevent admin from deleting themselves
+    if (userId === req.userId) {
+      throw new BadRequestError('VALIDATION', 'Cannot delete yourself');
+    }
+    const user = await getDb()('users').where('id', userId).first();
+    if (!user) throw new NotFoundError('User');
+
+    // Cascade: remove bets, wallet, leaderboard entries, group memberships
+    const db = getDb();
+    await db('bets').where('user_id', userId).del();
+    await db('wallet_transactions').where('user_id', userId).del();
+    await db('leaderboard_entries').where('user_id', userId).del();
+    await db('group_members').where('user_id', userId).del();
+    await db('users').where('id', userId).del();
+
+    res.status(204).send();
   } catch (err) { next(err); }
 });
 
