@@ -247,22 +247,46 @@ export async function reRankLeaderboard(
   trx?: Knex.Transaction
 ): Promise<void> {
   const conn = trx || getDb();
-  const orderBy = scoringFormat === 'points'
-    ? 'ORDER BY points DESC, best_streak DESC'
-    : 'ORDER BY win_rate DESC, best_streak DESC';
 
-  await conn.raw(
-    `UPDATE leaderboard_entries AS le
-     SET rank = sub.new_rank
-     FROM (
-       SELECT id,
-              ROW_NUMBER() OVER (${orderBy}) AS new_rank
-       FROM leaderboard_entries
-       WHERE group_id = ?
-     ) AS sub
-     WHERE le.id = sub.id`,
-    [groupId]
-  );
+  if (scoringFormat === 'points') {
+    // Points format: rank by points DESC
+    await conn.raw(
+      `UPDATE leaderboard_entries AS le
+       SET rank = sub.new_rank
+       FROM (
+         SELECT id,
+                ROW_NUMBER() OVER (ORDER BY points DESC, best_streak DESC) AS new_rank
+         FROM leaderboard_entries
+         WHERE group_id = ?
+       ) AS sub
+       WHERE le.id = sub.id`,
+      [groupId]
+    );
+  } else {
+    // Betting format: rank by wallet BALANCE DESC (credits)
+    await conn.raw(
+      `UPDATE leaderboard_entries AS le
+       SET rank = sub.new_rank
+       FROM (
+         SELECT le2.id,
+                ROW_NUMBER() OVER (
+                  ORDER BY COALESCE(w.balance, 0) DESC, le2.best_streak DESC
+                ) AS new_rank
+         FROM leaderboard_entries le2
+         LEFT JOIN LATERAL (
+           SELECT
+             COALESCE(SUM(CASE WHEN direction = 'credit' THEN amount ELSE 0 END), 0)
+             - COALESCE(SUM(CASE WHEN direction = 'debit' THEN amount ELSE 0 END), 0)
+             AS balance
+           FROM wallet_transactions
+           WHERE user_id = le2.user_id AND group_id = le2.group_id
+         ) w ON true
+         WHERE le2.group_id = ?
+       ) AS sub
+       WHERE le.id = sub.id`,
+      [groupId]
+    );
+  }
 }
 
 export async function getLeaderboard(

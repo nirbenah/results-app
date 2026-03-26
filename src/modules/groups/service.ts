@@ -260,10 +260,26 @@ export async function getLeaderboard(groupId: string) {
 
   const entries = await queries.getLeaderboard(groupId);
 
-  return {
-    group_id: groupId,
-    scoring_format: group.scoring_format,
-    entries: entries.map((e) => ({
+  // Fetch wallet balance for each entry (for betting format display)
+  const db = getDb();
+  const enriched = [];
+  for (const e of entries) {
+    let balance = 0;
+    if (group.scoring_format === 'betting') {
+      const result = await db('wallet_transactions')
+        .where({ user_id: e.user_id, group_id: groupId })
+        .select(
+          db.raw(`
+            COALESCE(SUM(CASE WHEN direction = 'credit' THEN amount ELSE 0 END), 0)
+            - COALESCE(SUM(CASE WHEN direction = 'debit' THEN amount ELSE 0 END), 0)
+            AS balance
+          `)
+        )
+        .first();
+      balance = Number(result?.balance ?? 0);
+    }
+
+    enriched.push({
       rank: e.rank,
       user: {
         id: e.user_id,
@@ -274,10 +290,17 @@ export async function getLeaderboard(groupId: string) {
       wins: e.wins,
       losses: e.losses,
       points: e.points,
+      balance,
       win_rate: Number(e.win_rate),
       current_streak: e.current_streak,
       best_streak: e.best_streak,
-    })),
+    });
+  }
+
+  return {
+    group_id: groupId,
+    scoring_format: group.scoring_format,
+    entries: enriched,
   };
 }
 

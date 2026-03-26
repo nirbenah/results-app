@@ -135,22 +135,42 @@ router.get('/bets', async (req: Request, res: Response, next: NextFunction) => {
 
     const rows = await queries.findBetsByUserAndGroup(userId, group_id, status);
 
-    const bets = rows.map((b) => ({
-      id: b.id,
-      status: b.status,
-      market_option: {
-        label: b.market_option_label,
-        odds: b.market_option_odds,
-      },
-      market: {
-        type: b.market_type,
-        match: b.home_team
-          ? { home_team: b.home_team, away_team: b.away_team }
-          : null,
-      },
-      placed_at: b.placed_at,
-      settled_at: b.settled_at,
-    }));
+    const bets = rows.map((b) => {
+      // Compute winning option for match_outcome markets
+      let winningOption: string | null = null;
+      if (b.match_status === 'finished' && b.home_score !== null && b.away_score !== null && b.market_type === 'match_outcome') {
+        if (b.home_score > b.away_score) winningOption = b.home_team || 'Home';
+        else if (b.away_score > b.home_score) winningOption = b.away_team || 'Away';
+        else winningOption = 'Draw';
+      }
+
+      return {
+        id: b.id,
+        status: b.status,
+        predicted_home_score: b.predicted_home_score,
+        predicted_away_score: b.predicted_away_score,
+        market_option: {
+          label: b.market_option_label,
+          odds: b.market_option_odds,
+        },
+        market: {
+          type: b.market_type,
+          status: b.market_status,
+          winning_option: winningOption,
+          match: b.home_team
+            ? {
+                home_team: b.home_team,
+                away_team: b.away_team,
+                home_score: b.home_score,
+                away_score: b.away_score,
+                status: b.match_status,
+              }
+            : null,
+        },
+        placed_at: b.placed_at,
+        settled_at: b.settled_at,
+      };
+    });
 
     res.json({ bets });
   } catch (err) {

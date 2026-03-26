@@ -271,12 +271,18 @@ export interface BetWithDetails {
   status: string;
   placed_at: string;
   settled_at: string | null;
+  predicted_home_score: number | null;
+  predicted_away_score: number | null;
   market_option_label: string;
   market_option_id: string;
   market_option_odds: number | null;
   market_type: string;
+  market_status: string;
   home_team: string | null;
   away_team: string | null;
+  home_score: number | null;
+  away_score: number | null;
+  match_status: string | null;
 }
 
 export async function findBetsByUserAndGroup(
@@ -295,12 +301,18 @@ export async function findBetsByUserAndGroup(
       'bets.status',
       'bets.placed_at',
       'bets.settled_at',
+      'bets.predicted_home_score',
+      'bets.predicted_away_score',
       'market_options.label as market_option_label',
       'market_options.id as market_option_id',
       'market_options.odds as market_option_odds',
       'markets.type as market_type',
+      'markets.status as market_status',
       'matches.home_team',
-      'matches.away_team'
+      'matches.away_team',
+      'matches.home_score',
+      'matches.away_score',
+      'matches.status as match_status'
     )
     .orderBy('bets.placed_at', 'desc');
   if (status) qb.where('bets.status', status);
@@ -322,8 +334,27 @@ export async function isGroupMember(
 
 export async function findGroupById(
   groupId: string
-): Promise<{ id: string; scoring_format: string; status: string } | undefined> {
-  return getDb()('groups').where('id', groupId).select('id', 'scoring_format', 'status').first();
+): Promise<{ id: string; scoring_format: string; status: string; allowed_bet_types: string[] } | undefined> {
+  return getDb()('groups').where('id', groupId).select('id', 'scoring_format', 'status', 'allowed_bet_types').first();
+}
+
+/**
+ * Check if a user already has a pending bet on ANY option in a given market (for a group).
+ * Used to enforce one-bet-per-market rule.
+ */
+export async function findExistingBetOnMarket(
+  userId: string,
+  groupId: string,
+  marketId: string
+): Promise<BetRow | undefined> {
+  return getDb()('bets')
+    .join('market_options', 'market_options.id', 'bets.market_option_id')
+    .where('bets.user_id', userId)
+    .where('bets.group_id', groupId)
+    .where('market_options.market_id', marketId)
+    .where('bets.status', 'pending')
+    .select('bets.*')
+    .first();
 }
 
 /**

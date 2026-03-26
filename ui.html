@@ -94,6 +94,7 @@
   .lb-rank.silver { color: #9ca3af; }
   .lb-rank.bronze { color: #d97706; }
   .lb-name { flex: 1; font-weight: 600; }
+  .lb-balance { font-size: 13px; font-weight: 700; color: #4ade80; margin-right: 10px; min-width: 60px; text-align: right; }
   .lb-stats { font-size: 12px; color: #6b7280; }
   .lb-highlight { background: #1e2a4a; border: 1px solid #4f6fff33; }
 
@@ -257,6 +258,29 @@
           </select>
         </div>
         <div class="form-group">
+          <label>Allowed Bet Types</label>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px;">
+            <label style="font-size:13px;color:#e1e1e6;display:flex;align-items:center;gap:6px;">
+              <input type="checkbox" id="bet-type-match-outcome" checked /> Match Results
+            </label>
+            <label style="font-size:13px;color:#e1e1e6;display:flex;align-items:center;gap:6px;">
+              <input type="checkbox" id="bet-type-in-match-event" /> In-Match Events
+            </label>
+            <label style="font-size:13px;color:#e1e1e6;display:flex;align-items:center;gap:6px;">
+              <input type="checkbox" id="bet-type-competition-winner" /> Competition Winner
+            </label>
+            <label style="font-size:13px;color:#e1e1e6;display:flex;align-items:center;gap:6px;">
+              <input type="checkbox" id="bet-type-top-goalscorer" /> Top Goalscorer
+            </label>
+            <label style="font-size:13px;color:#e1e1e6;display:flex;align-items:center;gap:6px;">
+              <input type="checkbox" id="bet-type-top-assists" /> Top Assists
+            </label>
+            <label style="font-size:13px;color:#e1e1e6;display:flex;align-items:center;gap:6px;">
+              <input type="checkbox" id="bet-type-man-of-season" /> Man of the Season
+            </label>
+          </div>
+        </div>
+        <div class="form-group">
           <label>Select Competitions</label>
           <div class="comp-chips" id="comp-chips-create"></div>
         </div>
@@ -318,7 +342,7 @@
         </div>
       </div>
 
-      <!-- Admin: Matches -->
+      <!-- Admin: Matches (with events and bet rates) -->
       <div class="card">
         <div class="card-title">Matches</div>
         <div class="form-group">
@@ -334,6 +358,14 @@
           <div class="form-group"><input id="admin-match-kickoff" type="datetime-local" /></div>
           <button class="btn btn-success btn-sm" id="btn-admin-add-match">Add Match</button>
         </div>
+        <!-- Match detail panel (markets + events + odds) -->
+        <div id="admin-match-detail" class="hidden" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- Admin: Groups -->
+      <div class="card">
+        <div class="card-title">Groups</div>
+        <div id="admin-groups-list"></div>
       </div>
 
       <!-- Admin: Users -->
@@ -341,6 +373,16 @@
         <div class="card-title">Users</div>
         <div id="admin-users-list"></div>
       </div>
+    </div>
+
+    <!-- INFORMATION SCREEN -->
+    <div id="screen-info" class="hidden">
+      <div class="section-title">Information</div>
+      <div class="form-group">
+        <label>Select Competition</label>
+        <select id="info-comp-select"><option value="">-- Choose --</option></select>
+      </div>
+      <div id="info-content"></div>
     </div>
 
     <!-- PROFILE SCREEN -->
@@ -374,6 +416,7 @@
     <button class="nav-item" data-screen="leaderboard"><span class="nav-icon">&#127942;</span>Board</button>
     <button class="nav-item" data-screen="wallet"><span class="nav-icon">&#128176;</span>Wallet</button>
     <button class="nav-item" data-screen="group"><span class="nav-icon">&#9881;</span>Groups</button>
+    <button class="nav-item" data-screen="info"><span class="nav-icon">&#8505;</span>Info</button>
     <button class="nav-item hidden" data-screen="admin" id="nav-admin"><span class="nav-icon">&#128736;</span>Admin</button>
     <button class="nav-item" data-screen="profile"><span class="nav-icon">&#128100;</span>Me</button>
   </div>
@@ -481,7 +524,7 @@ async function checkConnection() {
 
 // --- Screen management ---
 function showScreen(name) {
-  var screens = ['auth', 'matches', 'bets', 'leaderboard', 'wallet', 'group', 'admin', 'profile'];
+  var screens = ['auth', 'matches', 'bets', 'leaderboard', 'wallet', 'group', 'info', 'admin', 'profile'];
   screens.forEach(function(s) {
     var el = document.getElementById('screen-' + s);
     if (el) el.classList.toggle('hidden', s !== name);
@@ -712,8 +755,9 @@ async function loadWallet() {
       var cls = tx.direction === 'credit' ? 'tx-credit' : 'tx-debit';
       var sign = tx.direction === 'credit' ? '+' : '-';
       var label = tx.type.replace(/_/g, ' ');
+      var desc = tx.description ? ' — ' + tx.description : '';
       var time = new Date(tx.created_at).toLocaleTimeString();
-      html += '<div class="tx-row"><span>' + label + ' <span style="color:#4b5563;font-size:11px">' + time + '</span></span><span class="' + cls + '">' + sign + tx.amount + '</span></div>';
+      html += '<div class="tx-row"><span>' + label + desc + ' <span style="color:#4b5563;font-size:11px">' + time + '</span></span><span class="' + cls + '">' + sign + tx.amount + '</span></div>';
     }
     container.innerHTML = html;
   } catch (e) {
@@ -923,21 +967,6 @@ async function toggleMarkets(matchId) {
         html += '</div></div>';
       }
     }
-    container.innerHTML = html;
-    container.classList.remove('hidden');
-
-    container.querySelectorAll('[data-action="place-bet"]').forEach(function(btn) {
-      btn.addEventListener('click', function() { placeBet(this.dataset.option, this.dataset.label, this); });
-    });
-    container.querySelectorAll('[data-action="place-score-bet"]').forEach(function(btn) {
-      btn.addEventListener('click', function() {
-        var mid = this.dataset.match;
-        var optId = this.dataset.option;
-        var homeScore = parseInt(document.getElementById('predict-home-' + mid).value) || 0;
-        var awayScore = parseInt(document.getElementById('predict-away-' + mid).value) || 0;
-        placeScoreBet(optId, homeScore, awayScore, this);
-      });
-    });
     // Also load in-match events
     try {
       var eventsData = await api('GET', '/v1/matches/' + matchId + '/events');
@@ -1092,11 +1121,36 @@ async function loadBets() {
     for (var i = 0; i < data.bets.length; i++) {
       var bet = data.bets[i];
       var matchInfo = bet.market && bet.market.match ? bet.market.match.home_team + ' vs ' + bet.market.match.away_team : 'Outright';
-      var statusCls = bet.status === 'won' ? 'badge-won' : bet.status === 'lost' ? 'badge-lost' : 'badge-pending';
-      var oddsInfo = bet.market_option.odds ? ' @ ' + Number(bet.market_option.odds).toFixed(1) : '';
+      var statusCls = bet.status === 'won' ? 'badge-won' : bet.status === 'lost' ? 'badge-lost' : bet.status === 'void' ? 'badge-scheduled' : 'badge-pending';
+      var oddsInfo = bet.market_option && bet.market_option.odds ? ' @ ' + Number(bet.market_option.odds).toFixed(1) : '';
+
+      // Match result info
+      var resultLine = '';
+      if (bet.market && bet.market.match && bet.market.match.status === 'finished') {
+        var m = bet.market.match;
+        if (m.home_score !== undefined && m.home_score !== null) {
+          resultLine = 'Result: ' + m.home_team + ' ' + m.home_score + ' - ' + m.away_score + ' ' + m.away_team;
+        }
+      }
+
+      // Winning option
+      var winningLine = '';
+      if (bet.market && bet.market.winning_option) {
+        winningLine = 'Winning: ' + bet.market.winning_option;
+      }
+
+      // User's guess vs actual
+      var guessLine = 'Your pick: ' + (bet.market_option ? bet.market_option.label : '?');
+      if (bet.predicted_home_score !== undefined && bet.predicted_home_score !== null) {
+        guessLine += ' (' + bet.predicted_home_score + '-' + bet.predicted_away_score + ')';
+      }
+
       html += '<div class="card">'
-        + '<div class="card-title">' + bet.market_option.label + oddsInfo + ' <span class="badge ' + statusCls + '">' + bet.status + '</span></div>'
+        + '<div class="card-title">' + (bet.market_option ? bet.market_option.label : '?') + oddsInfo + ' <span class="badge ' + statusCls + '">' + bet.status + '</span></div>'
         + '<div style="font-size:12px;color:#6b7280">' + matchInfo + '</div>'
+        + '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">' + guessLine + '</div>'
+        + (resultLine ? '<div style="font-size:11px;color:#9ca3af;">' + resultLine + '</div>' : '')
+        + (winningLine ? '<div style="font-size:11px;color:#fbbf24;">' + winningLine + '</div>' : '')
         + '</div>';
     }
     container.innerHTML = html;
@@ -1140,9 +1194,15 @@ async function loadLeaderboard() {
       var streak = entry.current_streak > 0 ? ' | streak: ' + entry.current_streak : '';
       statsText += streak;
 
+      var balanceHtml = '';
+      if (!isPointsFmt && entry.balance !== undefined) {
+        balanceHtml = '<div class="lb-balance">' + entry.balance + ' cr</div>';
+      }
+
       html += '<div class="lb-row ' + highlight + '">'
         + '<div class="lb-rank ' + rankCls + '">' + rankDisplay + '</div>'
         + '<div class="lb-name" style="cursor:pointer;text-decoration:underline;" data-action="view-user-bets" data-user-id="' + entry.user.id + '" data-username="' + entry.user.username + '">' + entry.user.username + (isMe ? ' (you)' : '') + '</div>'
+        + balanceHtml
         + '<div class="lb-stats">' + statsText + '</div>'
         + '</div>';
     }
@@ -1195,6 +1255,15 @@ async function createGroup() {
 
   var scoringFormat = document.getElementById('scoring-format').value;
 
+  // Collect allowed bet types
+  var allowedBetTypes = [];
+  if (document.getElementById('bet-type-match-outcome').checked) allowedBetTypes.push('match_outcome');
+  if (document.getElementById('bet-type-in-match-event').checked) allowedBetTypes.push('in_match_event');
+  if (document.getElementById('bet-type-competition-winner').checked) allowedBetTypes.push('competition_winner');
+  if (document.getElementById('bet-type-top-goalscorer').checked) allowedBetTypes.push('top_goalscorer');
+  if (document.getElementById('bet-type-top-assists').checked) allowedBetTypes.push('top_assists');
+  if (document.getElementById('bet-type-man-of-season').checked) allowedBetTypes.push('man_of_season');
+
   var selectedChips = document.querySelectorAll('#comp-chips-create .comp-chip.selected');
   var competitionIds = [];
   selectedChips.forEach(function(chip) {
@@ -1205,6 +1274,7 @@ async function createGroup() {
     var group = await api('POST', '/v1/groups', {
       name: name,
       scoring_format: scoringFormat,
+      allowed_bet_types: allowedBetTypes,
       competition_ids: competitionIds,
     });
     log('Group "' + name + '" created!', 'success');
@@ -1301,6 +1371,7 @@ async function loadAdminMatches(compId) {
         if (!m.published) {
           actions += '<button class="btn btn-success btn-sm" data-action="pub-match" data-id="' + m.id + '" style="margin-right:4px;">Publish</button>';
         }
+        actions += '<button class="btn btn-outline btn-sm" data-action="view-match" data-id="' + m.id + '" data-label="' + m.home_team + ' vs ' + m.away_team + '" style="margin-right:4px;">View</button>';
         if (m.status !== 'finished') {
           actions += '<button class="btn btn-danger btn-sm" data-action="settle-admin" data-id="' + m.id + '" data-home="' + m.home_team + '" data-away="' + m.away_team + '">Settle</button>';
         } else {
@@ -1325,6 +1396,11 @@ async function loadAdminMatches(compId) {
           await api('PUT', '/v1/admin/matches/' + this.dataset.id + '/publish');
           var compId = document.getElementById('admin-match-comp').value;
           if (compId) loadAdminMatches(compId);
+        });
+      });
+      container.querySelectorAll('[data-action="view-match"]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          loadAdminMatchDetail(this.dataset.id, this.dataset.label);
         });
       });
     }
@@ -1410,6 +1486,273 @@ async function loadAdminUsers() {
   }
 }
 
+// --- Admin: Groups ---
+async function loadAdminGroups() {
+  try {
+    var data = await api('GET', '/v1/admin/groups');
+    var container = document.getElementById('admin-groups-list');
+    if (!data.groups || data.groups.length === 0) {
+      container.innerHTML = '<div class="empty">No groups</div>';
+      return;
+    }
+    var html = '<table class="admin-table"><tr><th>Name</th><th>Format</th><th>Members</th><th>Bet Types</th><th></th></tr>';
+    for (var i = 0; i < data.groups.length; i++) {
+      var g = data.groups[i];
+      var betTypes = (g.allowed_bet_types || []).map(function(t) { return t.replace(/_/g, ' '); }).join(', ') || 'all';
+      html += '<tr><td>' + g.name + '</td><td>' + g.scoring_format + '</td>'
+        + '<td>' + (g.member_count || '-') + '</td>'
+        + '<td style="font-size:11px;">' + betTypes + '</td>'
+        + '<td><button class="btn btn-outline btn-sm" data-action="view-group-members" data-id="' + g.id + '">Members</button></td></tr>';
+    }
+    html += '</table>';
+    container.innerHTML = html;
+    container.querySelectorAll('[data-action="view-group-members"]').forEach(function(btn) {
+      btn.addEventListener('click', function() { loadAdminGroupMembers(this.dataset.id); });
+    });
+  } catch (e) {
+    console.error('Admin groups error:', e);
+  }
+}
+
+async function loadAdminGroupMembers(groupId) {
+  try {
+    var data = await api('GET', '/v1/admin/groups/' + groupId + '/members');
+    var container = document.getElementById('admin-groups-list');
+    var html = '<div style="margin-bottom:8px;"><button class="btn btn-outline btn-sm" onclick="loadAdminGroups()">Back to Groups</button></div>';
+    html += '<table class="admin-table"><tr><th>User</th><th>Role</th><th>Balance</th></tr>';
+    var members = data.members || data;
+    for (var i = 0; i < members.length; i++) {
+      var m = members[i];
+      html += '<tr><td>' + (m.username || m.user_id) + '</td><td>' + (m.role || '-') + '</td><td style="color:#4ade80;font-weight:600;">' + (m.balance !== undefined ? m.balance + ' cr' : '-') + '</td></tr>';
+    }
+    html += '</table>';
+    container.innerHTML = html;
+  } catch (e) {
+    alert('Error loading members: ' + e.message);
+  }
+}
+
+// --- Admin: Match detail (markets, events, odds) ---
+async function loadAdminMatchDetail(matchId, matchLabel) {
+  var container = document.getElementById('admin-match-detail');
+  container.classList.remove('hidden');
+  container.innerHTML = '<div class="empty">Loading...</div>';
+
+  var html = '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">' + matchLabel + '</div>';
+
+  // Load markets (odds)
+  try {
+    var mData = await api('GET', '/v1/matches/' + matchId + '/markets');
+    if (mData.markets && mData.markets.length > 0) {
+      for (var i = 0; i < mData.markets.length; i++) {
+        var mk = mData.markets[i];
+        html += '<div style="background:#252636;border-radius:8px;padding:10px;margin-bottom:8px;">'
+          + '<div style="font-size:13px;font-weight:600;">' + mk.type.replace(/_/g, ' ') + ' <span class="badge badge-' + (mk.status === 'open' ? 'open' : 'lost') + '">' + mk.status + '</span></div>';
+        html += '<div class="options" style="margin-top:6px;">';
+        for (var j = 0; j < mk.options.length; j++) {
+          var o = mk.options[j];
+          var oddsVal = o.odds ? Number(o.odds).toFixed(2) : '-';
+          var isCorrect = o.is_correct ? ' style="border-color:#4ade80;background:#064e3b;"' : '';
+          html += '<div class="option-btn"' + isCorrect + '>'
+            + '<div class="option-label">' + o.label + '</div>'
+            + '<div class="option-odds">' + oddsVal + '</div>'
+            + '</div>';
+        }
+        html += '</div></div>';
+      }
+    } else {
+      html += '<div class="empty">No markets</div>';
+    }
+  } catch (e) {
+    html += '<div class="empty">Error loading markets</div>';
+  }
+
+  // Load events
+  try {
+    var eData = await api('GET', '/v1/matches/' + matchId + '/events');
+    if (eData.events && eData.events.length > 0) {
+      html += '<div style="font-size:13px;font-weight:700;color:#6b7280;margin:8px 0 4px;">IN-MATCH EVENTS</div>';
+      for (var ei = 0; ei < eData.events.length; ei++) {
+        var evt = eData.events[ei];
+        html += '<div style="background:#252636;border-radius:8px;padding:10px;margin-bottom:8px;">'
+          + '<div style="font-size:13px;font-weight:600;">' + (evt.question || 'Event') + ' <span class="badge badge-' + (evt.status === 'open' ? 'open' : 'lost') + '">' + evt.status + '</span></div>';
+        html += '<div class="options" style="margin-top:6px;">';
+        for (var ej = 0; ej < evt.options.length; ej++) {
+          var eo = evt.options[ej];
+          var eOddsVal = eo.odds ? Number(eo.odds).toFixed(2) : '-';
+          html += '<div class="option-btn">'
+            + '<div class="option-label">' + eo.label + '</div>'
+            + '<div class="option-odds">' + eOddsVal + '</div>'
+            + '</div>';
+        }
+        html += '</div></div>';
+      }
+    }
+  } catch (evtErr) {
+    // no events, that's OK
+  }
+
+  html += '<button class="btn btn-outline btn-sm btn-block" onclick="document.getElementById(\'admin-match-detail\').classList.add(\'hidden\');">Close</button>';
+  container.innerHTML = html;
+}
+
+// --- Information screen ---
+async function loadInfoCompetitions() {
+  var select = document.getElementById('info-comp-select');
+  select.innerHTML = '<option value="">-- Choose competition --</option>';
+  for (var i = 0; i < state.competitions.length; i++) {
+    var c = state.competitions[i];
+    select.innerHTML += '<option value="' + c.id + '">' + c.name + '</option>';
+  }
+}
+
+async function loadInfoContent(compId) {
+  if (!compId) {
+    document.getElementById('info-content').innerHTML = '';
+    return;
+  }
+  var container = document.getElementById('info-content');
+  container.innerHTML = '<div class="empty">Loading...</div>';
+  var html = '';
+
+  // Teams
+  try {
+    var tData = await api('GET', '/v1/competitions/' + compId + '/teams');
+    if (tData.teams && tData.teams.length > 0) {
+      html += '<div class="card"><div class="card-title">Teams (' + tData.teams.length + ')</div>';
+      html += '<div style="display:flex;flex-wrap:wrap;gap:6px;">';
+      for (var ti = 0; ti < tData.teams.length; ti++) {
+        var team = tData.teams[ti];
+        var logoHtml = team.logo_url ? '<img src="' + team.logo_url + '" style="width:16px;height:16px;margin-right:4px;" />' : '';
+        html += '<div class="comp-chip" style="cursor:pointer;" data-action="view-team-players" data-team-id="' + team.id + '" data-team-name="' + team.name + '">' + logoHtml + team.name + '</div>';
+      }
+      html += '</div>';
+      html += '<div id="info-team-players" style="margin-top:10px;"></div>';
+      html += '</div>';
+    }
+  } catch (e) { /* no teams endpoint */ }
+
+  // Matches / table
+  try {
+    var mData = await api('GET', '/v1/competitions/' + compId + '/matches');
+    if (mData.matches && mData.matches.length > 0) {
+      // Build a simple league table from finished matches
+      var teamStats = {};
+      for (var mi = 0; mi < mData.matches.length; mi++) {
+        var m = mData.matches[mi];
+        if (m.status !== 'finished') continue;
+        if (!teamStats[m.home_team]) teamStats[m.home_team] = { name: m.home_team, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
+        if (!teamStats[m.away_team]) teamStats[m.away_team] = { name: m.away_team, p: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, pts: 0 };
+        var hs = m.home_score, as = m.away_score;
+        var h = teamStats[m.home_team], a = teamStats[m.away_team];
+        h.p++; a.p++;
+        h.gf += hs; h.ga += as; a.gf += as; a.ga += hs;
+        if (hs > as) { h.w++; h.pts += 3; a.l++; }
+        else if (hs < as) { a.w++; a.pts += 3; h.l++; }
+        else { h.d++; a.d++; h.pts += 1; a.pts += 1; }
+      }
+      var table = Object.values(teamStats).sort(function(a, b) { return b.pts - a.pts || (b.gf - b.ga) - (a.gf - a.ga); });
+      if (table.length > 0) {
+        html += '<div class="card"><div class="card-title">Table</div>';
+        html += '<table class="admin-table"><tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr>';
+        for (var ri = 0; ri < table.length; ri++) {
+          var r = table[ri];
+          html += '<tr><td>' + (ri + 1) + '</td><td>' + r.name + '</td><td>' + r.p + '</td><td>' + r.w + '</td><td>' + r.d + '</td><td>' + r.l + '</td><td>' + r.gf + '</td><td>' + r.ga + '</td><td>' + (r.gf - r.ga) + '</td><td style="font-weight:700;">' + r.pts + '</td></tr>';
+        }
+        html += '</table></div>';
+      }
+
+      // Upcoming & recent matches
+      html += '<div class="card"><div class="card-title">Matches</div>';
+      for (var mi2 = 0; mi2 < mData.matches.length; mi2++) {
+        var mx = mData.matches[mi2];
+        var ko = new Date(mx.kickoff_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+        var scoreText = mx.status === 'finished' ? mx.home_score + ' - ' + mx.away_score : ko;
+        var opac = mx.status === 'finished' ? 'opacity:0.6;' : '';
+        html += '<div class="match" style="' + opac + '">'
+          + '<div class="match-teams"><div class="home">' + mx.home_team + '</div><div class="vs">' + scoreText + '</div><div class="away">' + mx.away_team + '</div></div>'
+          + '</div>';
+      }
+      html += '</div>';
+
+      // Top scorers (from match scores — basic count of goals per team)
+      // Note: we don't have individual player goals from the match API, but we show team-level stats
+    }
+  } catch (e) { /* no matches */ }
+
+  // Top players (goalscorers, assists, etc.) — from the teams/players endpoint
+  try {
+    var tData2 = await api('GET', '/v1/competitions/' + compId + '/teams');
+    var allPlayers = [];
+    if (tData2.teams) {
+      for (var tpi = 0; tpi < tData2.teams.length; tpi++) {
+        try {
+          var pData = await api('GET', '/v1/teams/' + tData2.teams[tpi].id + '/players');
+          if (pData.players) {
+            for (var ppi = 0; ppi < pData.players.length; ppi++) {
+              var pl = pData.players[ppi];
+              pl._team = tData2.teams[tpi].name;
+              allPlayers.push(pl);
+            }
+          }
+        } catch (pe) { /* skip */ }
+      }
+    }
+    if (allPlayers.length > 0) {
+      // Top goalscorers
+      var scorers = allPlayers.filter(function(p) { return p.goals > 0; }).sort(function(a, b) { return b.goals - a.goals; }).slice(0, 10);
+      if (scorers.length > 0) {
+        html += '<div class="card"><div class="card-title">Top Goalscorers</div>';
+        html += '<table class="admin-table"><tr><th>#</th><th>Player</th><th>Team</th><th>Goals</th></tr>';
+        for (var si = 0; si < scorers.length; si++) {
+          html += '<tr><td>' + (si + 1) + '</td><td>' + scorers[si].name + '</td><td style="font-size:11px;">' + scorers[si]._team + '</td><td style="font-weight:700;">' + scorers[si].goals + '</td></tr>';
+        }
+        html += '</table></div>';
+      }
+
+      // Top assists
+      var assisters = allPlayers.filter(function(p) { return p.assists > 0; }).sort(function(a, b) { return b.assists - a.assists; }).slice(0, 10);
+      if (assisters.length > 0) {
+        html += '<div class="card"><div class="card-title">Top Assists</div>';
+        html += '<table class="admin-table"><tr><th>#</th><th>Player</th><th>Team</th><th>Assists</th></tr>';
+        for (var ai = 0; ai < assisters.length; ai++) {
+          html += '<tr><td>' + (ai + 1) + '</td><td>' + assisters[ai].name + '</td><td style="font-size:11px;">' + assisters[ai]._team + '</td><td style="font-weight:700;">' + assisters[ai].assists + '</td></tr>';
+        }
+        html += '</table></div>';
+      }
+    }
+  } catch (e) { /* no player data */ }
+
+  container.innerHTML = html || '<div class="empty">No information available for this competition</div>';
+
+  // Bind team click → show players
+  container.querySelectorAll('[data-action="view-team-players"]').forEach(function(el) {
+    el.addEventListener('click', function() { loadTeamPlayers(this.dataset.teamId, this.dataset.teamName); });
+  });
+}
+
+async function loadTeamPlayers(teamId, teamName) {
+  var container = document.getElementById('info-team-players');
+  if (!container) return;
+  try {
+    var data = await api('GET', '/v1/teams/' + teamId + '/players');
+    if (!data.players || data.players.length === 0) {
+      container.innerHTML = '<div class="empty">No players for ' + teamName + '</div>';
+      return;
+    }
+    var html = '<div style="font-size:13px;font-weight:700;margin-bottom:6px;">' + teamName + ' Players</div>';
+    html += '<table class="admin-table"><tr><th>Name</th><th>Pos</th><th>Goals</th><th>Assists</th></tr>';
+    for (var i = 0; i < data.players.length; i++) {
+      var p = data.players[i];
+      html += '<tr><td>' + p.name + '</td><td>' + (p.position || '-') + '</td><td>' + (p.goals || 0) + '</td><td>' + (p.assists || 0) + '</td></tr>';
+    }
+    html += '</table>';
+    container.innerHTML = html;
+  } catch (e) {
+    container.innerHTML = '<div class="empty">Error loading players</div>';
+  }
+}
+
 // --- Profile functions ---
 async function loadProfile() {
   try {
@@ -1473,7 +1816,8 @@ document.querySelectorAll('.nav-item').forEach(function(btn) {
     if (screen === 'leaderboard') loadLeaderboard();
     if (screen === 'matches') loadMatches();
     if (screen === 'group') { loadMyGroups(); loadGroupDetails(); }
-    if (screen === 'admin') { loadAdminCompetitions(); loadAdminUsers(); }
+    if (screen === 'info') { loadInfoCompetitions(); }
+    if (screen === 'admin') { loadAdminCompetitions(); loadAdminUsers(); loadAdminGroups(); }
     if (screen === 'profile') loadProfile();
   });
 });
@@ -1489,6 +1833,9 @@ document.getElementById('btn-admin-add-match').addEventListener('click', adminAd
 document.getElementById('btn-update-profile').addEventListener('click', updateProfile);
 document.getElementById('admin-match-comp').addEventListener('change', function() {
   loadAdminMatches(this.value);
+});
+document.getElementById('info-comp-select').addEventListener('change', function() {
+  loadInfoContent(this.value);
 });
 
 // --- Init ---

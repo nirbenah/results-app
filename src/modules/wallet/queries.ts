@@ -19,6 +19,7 @@ export interface WalletTransaction {
   amount: number;
   direction: TransactionDirection;
   reference_id: string | null;
+  description: string | null;
   created_at: string;
 }
 
@@ -71,6 +72,7 @@ export async function insertTransaction(
     amount: number;
     direction: TransactionDirection;
     reference_id?: string | null;
+    description?: string | null;
   },
   trx?: Knex
 ): Promise<WalletTransaction> {
@@ -84,6 +86,7 @@ export async function insertTransaction(
       amount: tx.amount,
       direction: tx.direction,
       reference_id: tx.reference_id ?? null,
+      description: tx.description ?? null,
     })
     .returning('*');
 

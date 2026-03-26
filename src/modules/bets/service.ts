@@ -43,7 +43,7 @@ export interface PlaceBetResult {
 export async function placeBet(params: PlaceBetParams): Promise<PlaceBetResult> {
   const { userId, groupId, marketOptionId, predictedHomeScore, predictedAwayScore, correlationId } = params;
 
-  // Check for existing bet (idempotency)
+  // Check for existing bet on same option (idempotency)
   const existingBet = await queries.findExistingBet(userId, groupId, marketOptionId);
   if (existingBet) {
     const option = await queries.findMarketOptionById(marketOptionId);
@@ -78,6 +78,34 @@ export async function placeBet(params: PlaceBetParams): Promise<PlaceBetResult> 
   const inGroup = await queries.isMarketInGroup(marketOptionId, groupId);
   if (!inGroup) {
     throw new BadRequestError('COMPETITION_NOT_IN_GROUP', 'This competition is not part of your group');
+  }
+
+  // Validate allowed bet types for this group
+  if (group.allowed_bet_types && group.allowed_bet_types.length > 0) {
+    if (!group.allowed_bet_types.includes(market.type)) {
+      throw new BadRequestError('BET_TYPE_NOT_ALLOWED', `This group does not allow ${market.type.replace(/_/g, ' ')} bets`);
+    }
+  }
+
+  // ONE BET PER MARKET per user per group — check if user already bet on another option in this market
+  const existingMarketBet = await queries.findExistingBetOnMarket(userId, groupId, option.market_id);
+  if (existingMarketBet) {
+    // User is changing their bet — void the old one and refund
+    const db = getDb();
+    await db('bets')
+      .where('id', existingMarketBet.id)
+      .update({ status: 'void', settled_at: db.fn.now() });
+
+    // Refund the entry fee for the old bet
+    const walletQueries = await import('../wallet/queries');
+    await walletQueries.insertTransaction({
+      user_id: userId,
+      group_id: groupId,
+      type: 'refund',
+      amount: BET_STAKE,
+      direction: 'credit',
+      reference_id: existingMarketBet.id,
+    });
   }
 
   // Insert the bet

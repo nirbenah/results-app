@@ -52,7 +52,8 @@ export async function creditInitialBalance(
 export async function creditParticipationBonus(
   userId: string,
   groupId: string,
-  betId: string
+  betId: string,
+  description?: string
 ): Promise<queries.WalletTransaction> {
   return queries.insertTransaction({
     user_id: userId,
@@ -61,6 +62,7 @@ export async function creditParticipationBonus(
     amount: PARTICIPATION_BONUS,
     direction: 'credit',
     reference_id: betId,
+    description: description || null,
   });
 }
 
@@ -71,7 +73,8 @@ export async function creditParticipationBonus(
 export async function debitEntryFee(
   userId: string,
   groupId: string,
-  betId?: string
+  betId?: string,
+  description?: string
 ): Promise<queries.WalletTransaction> {
   const db = getDb();
 
@@ -93,6 +96,7 @@ export async function debitEntryFee(
         amount: BET_STAKE,
         direction: 'debit',
         reference_id: betId,
+        description: description || null,
       },
       trx
     );
@@ -107,7 +111,8 @@ export async function creditWin(
   userId: string,
   groupId: string,
   betId: string,
-  payout: number
+  payout: number,
+  description?: string
 ): Promise<queries.WalletTransaction> {
   return queries.insertTransaction({
     user_id: userId,
@@ -116,5 +121,6 @@ export async function creditWin(
     amount: payout,
     direction: 'credit',
     reference_id: betId,
+    description: description || null,
   });
 }
