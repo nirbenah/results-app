@@ -90,22 +90,11 @@ export async function placeBet(params: PlaceBetParams): Promise<PlaceBetResult> 
   // ONE BET PER MARKET per user per group — check if user already bet on another option in this market
   const existingMarketBet = await queries.findExistingBetOnMarket(userId, groupId, option.market_id);
   if (existingMarketBet) {
-    // User is changing their bet — void the old one and refund
+    // User is changing their bet — void the old one (no refund needed since no upfront debit)
     const db = getDb();
     await db('bets')
       .where('id', existingMarketBet.id)
       .update({ status: 'void', settled_at: db.fn.now() });
-
-    // Refund the entry fee for the old bet
-    const walletQueries = await import('../wallet/queries');
-    await walletQueries.insertTransaction({
-      user_id: userId,
-      group_id: groupId,
-      type: 'refund',
-      amount: BET_STAKE,
-      direction: 'credit',
-      reference_id: existingMarketBet.id,
-    });
   }
 
   // Insert the bet
@@ -126,6 +115,7 @@ export async function placeBet(params: PlaceBetParams): Promise<PlaceBetResult> 
     market_type: market.type,
     stake: BET_STAKE,
     odds: option.odds ?? null,
+    scoring_format: group.scoring_format,
   };
   await publishEvent(EventNames.BET_PLACED, payload, correlationId);
 

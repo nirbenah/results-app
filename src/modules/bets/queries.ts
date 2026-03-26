@@ -276,6 +276,7 @@ export interface BetWithDetails {
   market_option_label: string;
   market_option_id: string;
   market_option_odds: number | null;
+  market_id: string;
   market_type: string;
   market_status: string;
   home_team: string | null;
@@ -306,6 +307,7 @@ export async function findBetsByUserAndGroup(
       'market_options.label as market_option_label',
       'market_options.id as market_option_id',
       'market_options.odds as market_option_odds',
+      'markets.id as market_id',
       'markets.type as market_type',
       'markets.status as market_status',
       'matches.home_team',

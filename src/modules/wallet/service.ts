@@ -104,6 +104,27 @@ export async function debitEntryFee(
 }
 
 /**
+ * Debit a user's wallet after losing a bet (stake deducted at settlement).
+ */
+export async function debitStake(
+  userId: string,
+  groupId: string,
+  betId: string,
+  amount: number,
+  description?: string
+): Promise<queries.WalletTransaction> {
+  return queries.insertTransaction({
+    user_id: userId,
+    group_id: groupId,
+    type: 'bet_loss',
+    amount,
+    direction: 'debit',
+    reference_id: betId,
+    description: description || null,
+  });
+}
+
+/**
  * Credit a user's wallet after winning a bet.
  * Payout = stake × odds.
  */

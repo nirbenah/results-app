@@ -8,7 +8,7 @@
 import { Knex } from 'knex';
 import { getDb } from '../../shared/db';
 
-export type TransactionType = 'initial_balance' | 'entry_fee' | 'bet_win' | 'participation_bonus' | 'refund';
+export type TransactionType = 'initial_balance' | 'entry_fee' | 'bet_win' | 'bet_loss' | 'participation_bonus' | 'refund';
 export type TransactionDirection = 'debit' | 'credit';
 
 export interface WalletTransaction {

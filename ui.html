@@ -600,6 +600,9 @@ function showScreen(name) {
   var loggedIn = !!state.token;
   document.getElementById('bottomnav').classList.toggle('hidden', !loggedIn);
   document.getElementById('userbar').classList.toggle('hidden', !loggedIn);
+
+  // Hide wallet tab for points-format groups
+  updateWalletNavVisibility();
 }
 
 // --- Auth ---
@@ -817,7 +820,15 @@ async function selectGroup(groupId) {
   renderGroupSelector();
   renderMyGroupsList();
   updateNoGroupNotice();
+  updateWalletNavVisibility();
   await refreshActiveGroupData();
+}
+
+function updateWalletNavVisibility() {
+  var activeGroup = getActiveGroup();
+  var isPoints = activeGroup && activeGroup.scoring_format === 'points';
+  var walletNav = document.querySelector('.nav-item[data-screen="wallet"]');
+  if (walletNav) walletNav.classList.toggle('hidden', !!isPoints);
 }
 
 async function refreshActiveGroupData() {
@@ -1094,7 +1105,7 @@ async function toggleMarkets(matchId) {
           + '<div class="options">';
         for (var j = 0; j < market.options.length; j++) {
           var opt = market.options[j];
-          var oddsText = opt.odds ? Number(opt.odds).toFixed(1) : '-';
+          var oddsText = isPointsFormat && market.type !== 'match_outcome' ? '1pt' : (opt.odds ? Number(opt.odds).toFixed(1) : '-');
           html += '<div class="option-btn" data-action="place-bet" data-option="' + opt.id + '" data-label="' + opt.label + '">'
             + '<div class="option-label">' + opt.label + '</div>'
             + '<div class="option-odds">' + oddsText + '</div>'
@@ -1115,10 +1126,10 @@ async function toggleMarkets(matchId) {
             + '<div class="options">';
           for (var ej = 0; ej < evt.options.length; ej++) {
             var eo = evt.options[ej];
-            var eOdds = eo.odds ? Number(eo.odds).toFixed(1) : '-';
+            var eOddsDisplay = isPointsFormat ? '1pt' : (eo.odds ? Number(eo.odds).toFixed(1) : '-');
             html += '<div class="option-btn" data-action="place-bet" data-option="' + eo.id + '" data-label="' + eo.label + '">'
               + '<div class="option-label">' + eo.label + '</div>'
-              + '<div class="option-odds">' + eOdds + '</div>'
+              + '<div class="option-odds">' + eOddsDisplay + '</div>'
               + '</div>';
           }
           html += '</div></div>';
@@ -1131,9 +1142,68 @@ async function toggleMarkets(matchId) {
     container.innerHTML = html;
     container.classList.remove('hidden');
 
-    container.querySelectorAll('[data-action="place-bet"]').forEach(function(btn) {
-      btn.addEventListener('click', function() { placeBet(this.dataset.option, this.dataset.label, this); });
+    // Load existing bets and highlight selected options
+    var betsData = await api('GET', '/v1/bets?group_id=' + state.activeGroupId);
+    var betsByOption = {};
+    betsData.bets.forEach(function(b) {
+      if (b.status === 'pending' && b.market_option && b.market_option.id) betsByOption[b.market_option.id] = b;
     });
+
+    // Highlight already-selected options
+    container.querySelectorAll('[data-action="place-bet"]').forEach(function(btn) {
+      var optId = btn.dataset.option;
+      if (betsByOption[optId]) {
+        btn.classList.add('selected');
+      }
+    });
+
+    // Pre-populate score predictions if existing bet has predicted scores
+    betsData.bets.forEach(function(b) {
+      if (b.status === 'pending' && b.predicted_home_score !== undefined && b.predicted_home_score !== null) {
+        var homeInput = document.getElementById('predict-home-' + matchId);
+        var awayInput = document.getElementById('predict-away-' + matchId);
+        if (homeInput && awayInput) {
+          homeInput.value = b.predicted_home_score;
+          awayInput.value = b.predicted_away_score;
+          // Update button text to indicate update
+          var scoreBtn = container.querySelector('[data-action="place-score-bet"][data-match="' + matchId + '"]');
+          if (scoreBtn) scoreBtn.textContent = 'Update Prediction';
+        }
+      }
+    });
+
+    // Bet toggle click handlers
+    container.querySelectorAll('[data-action="place-bet"]').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        var optionId = this.dataset.option;
+        var el = this;
+
+        // If already selected, cancel the bet
+        if (el.classList.contains('selected')) {
+          var existingBet = betsByOption[optionId];
+          if (existingBet) {
+            try {
+              await api('DELETE', '/v1/bets/' + existingBet.id);
+              el.classList.remove('selected');
+              delete betsByOption[optionId];
+              log('Bet cancelled', 'success');
+              await Promise.all([loadBets(), loadLeaderboard()]);
+            } catch (e) { alert('Cancel failed: ' + e.message); }
+          }
+          return;
+        }
+
+        // Remove selection from other options in same market (same card)
+        var card = el.closest('.card');
+        card.querySelectorAll('.option-btn.selected').forEach(function(other) {
+          other.classList.remove('selected');
+        });
+
+        // Place the bet
+        placeBet(optionId, el.dataset.label, el);
+      });
+    });
+
     container.querySelectorAll('[data-action="place-score-bet"]').forEach(function(btn) {
       btn.addEventListener('click', function() {
         var mid = this.dataset.match;
@@ -1889,6 +1959,7 @@ async function loadAdminMatchDetail(matchId, matchLabel) {
       html += '<div style="font-size:12px;font-weight:700;color:#6b7280;margin-bottom:4px;">MATCH MARKETS</div>';
       for (var i = 0; i < mData.markets.length; i++) {
         var mk = mData.markets[i];
+        if (mk.type === 'in_match_event') continue; // shown in events section below
         html += '<div style="background:#252636;border-radius:8px;padding:10px;margin-bottom:8px;">'
           + '<div style="font-size:13px;font-weight:600;">' + mk.type.replace(/_/g, ' ') + ' <span class="badge badge-' + (mk.status === 'open' ? 'open' : 'lost') + '">' + mk.status + '</span></div>';
         html += '<div style="margin-top:6px;">';
@@ -2261,6 +2332,7 @@ document.getElementById('group-select').addEventListener('change', function() {
     saveSession();
     renderMyGroupsList();
     updateNoGroupNotice();
+    updateWalletNavVisibility();
     document.getElementById('user-balance').textContent = '';
     document.getElementById('group-detail-section').classList.add('hidden');
   }

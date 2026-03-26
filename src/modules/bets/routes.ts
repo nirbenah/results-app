@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import * as queries from './queries';
 import * as service from './service';
-import { BadRequestError } from '../../shared/errors';
+import { BadRequestError, NotFoundError } from '../../shared/errors';
 
 const router = Router();
 
@@ -150,10 +150,12 @@ router.get('/bets', async (req: Request, res: Response, next: NextFunction) => {
         predicted_home_score: b.predicted_home_score,
         predicted_away_score: b.predicted_away_score,
         market_option: {
+          id: b.market_option_id,
           label: b.market_option_label,
           odds: b.market_option_odds,
         },
         market: {
+          id: b.market_id,
           type: b.market_type,
           status: b.market_status,
           winning_option: winningOption,
@@ -176,6 +178,40 @@ router.get('/bets', async (req: Request, res: Response, next: NextFunction) => {
   } catch (err) {
     next(err);
   }
+});
+
+// ─── DELETE /v1/bets/:betId — Cancel a pending bet ───
+
+router.delete('/bets/:betId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.userId;
+    if (!userId) throw new BadRequestError('AUTH_REQUIRED', 'Authentication required');
+
+    const db = (await import('../../shared/db')).getDb();
+    const bet = await db('bets')
+      .where('id', req.params.betId)
+      .where('user_id', userId)
+      .where('status', 'pending')
+      .first();
+
+    if (!bet) throw new NotFoundError('Bet not found or already settled');
+
+    // Check if the market is still open
+    const marketInfo = await db('market_options')
+      .join('markets', 'markets.id', 'market_options.market_id')
+      .where('market_options.id', bet.market_option_id)
+      .select('markets.status as market_status', 'markets.closes_at')
+      .first();
+
+    if (!marketInfo || marketInfo.market_status !== 'open') {
+      throw new BadRequestError('MARKET_CLOSED', 'Cannot cancel bet - market is no longer open');
+    }
+
+    // Void the bet
+    await db('bets').where('id', bet.id).update({ status: 'void', settled_at: db.fn.now() });
+
+    res.json({ message: 'Bet cancelled', bet_id: bet.id });
+  } catch (err) { next(err); }
 });
 
 // ─── GET /v1/competitions/:id/teams (public) ───

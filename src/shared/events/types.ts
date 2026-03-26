@@ -60,6 +60,7 @@ export interface BetPlacedPayload {
   market_type: string;
   stake: number;
   odds: number | null;
+  scoring_format: string;
 }
 
 export interface BetSettledPayload {

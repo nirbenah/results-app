@@ -80,74 +80,72 @@ export function registerSubscribers(): void {
   );
 
   /**
-   * bet.placed — debit entry fee and credit participation bonus.
-   * Includes match/event description.
+   * bet.placed — no wallet transactions at placement time.
+   * For betting format: debit/credit happens at settlement.
+   * For points format: no wallet transactions at all.
    */
   bus.subscribe(
     EventNames.BET_PLACED,
-    async (envelope: EventEnvelope) => {
-      const payload = envelope.payload as BetPlacedPayload;
-
-      const description = await getBetDescription(payload.bet_id, payload.market_type);
-
-      try {
-        await walletService.debitEntryFee(
-          payload.user_id,
-          payload.group_id,
-          payload.bet_id,
-          description
-        );
-      } catch (err) {
-        console.error(
-          `[Wallet] Failed to debit entry fee for bet ${payload.bet_id}:`,
-          err
-        );
-      }
-
-      try {
-        await walletService.creditParticipationBonus(
-          payload.user_id,
-          payload.group_id,
-          payload.bet_id,
-          description
-        );
-      } catch (err) {
-        console.error(
-          `[Wallet] Failed to credit participation bonus for bet ${payload.bet_id}:`,
-          err
-        );
-      }
+    async (_envelope: EventEnvelope) => {
+      // No wallet transactions at bet placement.
+      // Betting format: stake is debited at settlement (loss) or winnings credited (win).
+      // Points format: no wallet transactions.
     }
   );
 
   /**
-   * bet.settled with outcome='won' — credit the user's wallet with payout (stake × odds).
-   * Includes match/event description.
+   * bet.settled — handle wallet transactions at settlement time.
+   * Betting format: credit wins (stake × odds), debit losses (stake of 100).
+   * Points format: no wallet transactions (points handled elsewhere).
    */
   bus.subscribe(
     EventNames.BET_SETTLED,
     async (envelope: EventEnvelope) => {
       const payload = envelope.payload as BetSettledPayload;
 
-      if (payload.outcome !== 'won') {
+      // Look up the group's scoring_format
+      const db = getDb();
+      const group = await db('groups').where('id', payload.group_id).select('scoring_format').first();
+      const scoringFormat = group?.scoring_format || 'betting';
+
+      // Points format: no wallet transactions
+      if (scoringFormat === 'points') {
         return;
       }
 
+      // Betting format
       const description = await getBetDescription(payload.bet_id, payload.market_type);
 
-      try {
-        await walletService.creditWin(
-          payload.user_id,
-          payload.group_id,
-          payload.bet_id,
-          payload.payout,
-          `Won: ${description}`
-        );
-      } catch (err) {
-        console.error(
-          `[Wallet] Failed to credit win for bet ${payload.bet_id}:`,
-          err
-        );
+      if (payload.outcome === 'won') {
+        try {
+          await walletService.creditWin(
+            payload.user_id,
+            payload.group_id,
+            payload.bet_id,
+            payload.payout,
+            `Won: ${description}`
+          );
+        } catch (err) {
+          console.error(
+            `[Wallet] Failed to credit win for bet ${payload.bet_id}:`,
+            err
+          );
+        }
+      } else if (payload.outcome === 'lost') {
+        try {
+          await walletService.debitStake(
+            payload.user_id,
+            payload.group_id,
+            payload.bet_id,
+            100,
+            `Lost: ${description}`
+          );
+        } catch (err) {
+          console.error(
+            `[Wallet] Failed to debit loss for bet ${payload.bet_id}:`,
+            err
+          );
+        }
       }
     }
   );
