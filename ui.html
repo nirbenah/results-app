@@ -358,6 +358,31 @@
         </div>
       </div>
 
+      <!-- Admin: Teams & Players (per competition) -->
+      <div class="card">
+        <div class="card-title">Teams &amp; Players</div>
+        <div class="form-group">
+          <label>Competition</label>
+          <select id="admin-teams-comp"></select>
+        </div>
+        <div id="admin-teams-list"></div>
+        <div style="margin-top:8px;display:flex;gap:6px;">
+          <input id="admin-new-team-name" placeholder="New team name" style="flex:1;padding:6px 8px;font-size:12px;" />
+          <button class="btn btn-success btn-sm" id="btn-admin-add-team">+ Team</button>
+        </div>
+        <!-- Expandable players panel for selected team -->
+        <div id="admin-players-panel" class="hidden" style="margin-top:12px;background:#1a1b23;border-radius:8px;padding:12px;">
+          <div style="font-size:13px;font-weight:700;margin-bottom:8px;" id="admin-players-title"></div>
+          <div id="admin-players-list"></div>
+          <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+            <input id="admin-new-player-name" placeholder="Player name" style="flex:2;min-width:100px;padding:6px 8px;font-size:12px;" />
+            <input id="admin-new-player-position" placeholder="Pos (e.g. ST)" style="flex:1;min-width:40px;padding:6px 8px;font-size:12px;" />
+            <button class="btn btn-success btn-sm" id="btn-admin-add-player">+ Player</button>
+          </div>
+          <button class="btn btn-outline btn-sm" style="margin-top:6px;" onclick="document.getElementById('admin-players-panel').classList.add('hidden');">Close</button>
+        </div>
+      </div>
+
       <!-- Admin: Matches (with events and bet rates) -->
       <div class="card">
         <div class="card-title">Matches</div>
@@ -368,8 +393,14 @@
         <div id="admin-matches-list"></div>
         <div style="margin-top:10px;">
           <div style="display:flex;gap:8px;">
-            <div class="form-group" style="flex:1"><input id="admin-match-home" placeholder="Home team" /></div>
-            <div class="form-group" style="flex:1"><input id="admin-match-away" placeholder="Away team" /></div>
+            <div class="form-group" style="flex:1">
+              <label style="font-size:11px;color:#6b7280;">Home</label>
+              <select id="admin-match-home-select"><option value="">-- select team --</option></select>
+            </div>
+            <div class="form-group" style="flex:1">
+              <label style="font-size:11px;color:#6b7280;">Away</label>
+              <select id="admin-match-away-select"><option value="">-- select team --</option></select>
+            </div>
           </div>
           <div class="form-group"><input id="admin-match-kickoff" type="datetime-local" /></div>
           <button class="btn btn-success btn-sm" id="btn-admin-add-match">Add Match</button>
@@ -1415,6 +1446,10 @@ async function joinGroup() {
 }
 
 // --- Admin functions ---
+// ═══ Admin state for teams/players ═══
+var adminTeamsCache = {}; // compId → [{id, name, short_name}]
+var adminSelectedTeamId = null;
+
 async function loadAdminCompetitions() {
   try {
     var data = await api('GET', '/v1/admin/competitions');
@@ -1422,19 +1457,19 @@ async function loadAdminCompetitions() {
     if (!data.competitions.length) {
       container.innerHTML = '<div class="empty">No competitions</div>';
     } else {
-      var html = '<table class="admin-table"><tr><th>Name</th><th>Status</th><th></th></tr>';
+      var html = '<table class="admin-table"><tr><th>Name</th><th>Sport</th><th>Status</th><th></th></tr>';
       for (var i = 0; i < data.competitions.length; i++) {
         var c = data.competitions[i];
         var pubBadge = c.published ? '<span class="badge badge-active">published</span>' : '<span class="badge badge-scheduled">draft</span>';
         var pubBtn = !c.published ? '<button class="btn btn-success btn-sm" data-action="pub-comp" data-id="' + c.id + '" style="margin-right:4px;">Publish</button>' : '';
-        html += '<tr><td>' + c.name + '</td><td>' + pubBadge + '</td>'
+        html += '<tr><td>' + c.name + '</td><td>' + (c.sport || '') + '</td><td>' + pubBadge + '</td>'
           + '<td>' + pubBtn + '<button class="btn btn-danger btn-sm" data-action="del-comp" data-id="' + c.id + '">Del</button></td></tr>';
       }
       html += '</table>';
       container.innerHTML = html;
       container.querySelectorAll('[data-action="del-comp"]').forEach(function(btn) {
         btn.addEventListener('click', async function() {
-          if (confirm('Delete this competition?')) {
+          if (confirm('Delete this competition and all its teams/matches?')) {
             await api('DELETE', '/v1/admin/competitions/' + this.dataset.id);
             loadAdminCompetitions();
           }
@@ -1448,17 +1483,176 @@ async function loadAdminCompetitions() {
         });
       });
     }
-    // Also populate match competition dropdown
-    var select = document.getElementById('admin-match-comp');
-    select.innerHTML = data.competitions.map(function(c) {
+
+    // Populate all competition dropdowns
+    var compOptions = data.competitions.map(function(c) {
       return '<option value="' + c.id + '">' + c.name + '</option>';
     }).join('');
-    if (select.value) loadAdminMatches(select.value);
+
+    var matchComp = document.getElementById('admin-match-comp');
+    var prevMatch = matchComp.value;
+    matchComp.innerHTML = compOptions;
+    if (prevMatch && matchComp.querySelector('option[value="' + prevMatch + '"]')) matchComp.value = prevMatch;
+
+    var teamsComp = document.getElementById('admin-teams-comp');
+    var prevTeams = teamsComp.value;
+    teamsComp.innerHTML = compOptions;
+    if (prevTeams && teamsComp.querySelector('option[value="' + prevTeams + '"]')) teamsComp.value = prevTeams;
+
+    // Load data for selected comp
+    if (matchComp.value) {
+      loadAdminMatches(matchComp.value);
+      loadMatchTeamDropdowns(matchComp.value);
+    }
+    if (teamsComp.value) loadAdminTeams(teamsComp.value);
   } catch (e) {
     console.error('Admin competitions error:', e);
   }
 }
 
+// ═══ Teams management ═══
+async function loadAdminTeams(compId) {
+  if (!compId) return;
+  try {
+    var data = await api('GET', '/v1/admin/competitions/' + compId + '/teams');
+    var teams = data.teams || [];
+    adminTeamsCache[compId] = teams;
+    var container = document.getElementById('admin-teams-list');
+    if (!teams.length) {
+      container.innerHTML = '<div class="empty">No teams yet. Add teams below.</div>';
+    } else {
+      var html = '<table class="admin-table"><tr><th>Team</th><th>Players</th><th></th></tr>';
+      for (var i = 0; i < teams.length; i++) {
+        var t = teams[i];
+        html += '<tr>'
+          + '<td style="font-weight:600;">' + t.name + (t.short_name ? ' <span style="color:#6b7280;font-size:11px;">(' + t.short_name + ')</span>' : '') + '</td>'
+          + '<td><button class="btn btn-outline btn-sm" data-action="manage-players" data-team-id="' + t.id + '" data-team-name="' + t.name + '">Manage Players</button></td>'
+          + '<td><button class="btn btn-danger btn-sm" data-action="del-team" data-id="' + t.id + '" data-name="' + t.name + '">Del</button></td>'
+          + '</tr>';
+      }
+      html += '</table>';
+      container.innerHTML = html;
+      container.querySelectorAll('[data-action="manage-players"]').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          adminSelectedTeamId = this.dataset.teamId;
+          document.getElementById('admin-players-title').textContent = this.dataset.teamName + ' — Players';
+          document.getElementById('admin-players-panel').classList.remove('hidden');
+          loadAdminPlayers(this.dataset.teamId);
+        });
+      });
+      container.querySelectorAll('[data-action="del-team"]').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          if (!confirm('Delete team "' + this.dataset.name + '" and all its players?')) return;
+          try {
+            await api('DELETE', '/v1/admin/teams/' + this.dataset.id);
+            var compId = document.getElementById('admin-teams-comp').value;
+            loadAdminTeams(compId);
+            loadMatchTeamDropdowns(document.getElementById('admin-match-comp').value);
+          } catch (e) { alert('Error: ' + e.message); }
+        });
+      });
+    }
+  } catch (e) {
+    console.error('Admin teams error:', e);
+  }
+}
+
+async function adminAddTeam() {
+  var compId = document.getElementById('admin-teams-comp').value;
+  var name = document.getElementById('admin-new-team-name').value.trim();
+  if (!compId || !name) return alert('Select a competition and enter team name');
+  try {
+    await api('POST', '/v1/admin/teams', { competition_id: compId, name: name });
+    document.getElementById('admin-new-team-name').value = '';
+    loadAdminTeams(compId);
+    // Also refresh the match team dropdowns if same competition
+    if (document.getElementById('admin-match-comp').value === compId) {
+      loadMatchTeamDropdowns(compId);
+    }
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ═══ Players management ═══
+async function loadAdminPlayers(teamId) {
+  if (!teamId) return;
+  try {
+    var data = await api('GET', '/v1/admin/teams/' + teamId + '/players');
+    var container = document.getElementById('admin-players-list');
+    var players = data.players || [];
+    if (!players.length) {
+      container.innerHTML = '<div class="empty">No players. Add below.</div>';
+    } else {
+      var html = '<table class="admin-table"><tr><th>Name</th><th>Pos</th><th>Goals</th><th>Assists</th><th></th></tr>';
+      for (var i = 0; i < players.length; i++) {
+        var p = players[i];
+        html += '<tr>'
+          + '<td>' + p.name + '</td>'
+          + '<td>' + (p.position || '-') + '</td>'
+          + '<td><input type="number" min="0" value="' + (p.goals || 0) + '" data-pid="' + p.id + '" data-field="goals" class="admin-player-stat" style="width:50px;padding:3px;font-size:12px;text-align:center;" /></td>'
+          + '<td><input type="number" min="0" value="' + (p.assists || 0) + '" data-pid="' + p.id + '" data-field="assists" class="admin-player-stat" style="width:50px;padding:3px;font-size:12px;text-align:center;" /></td>'
+          + '<td><button class="btn btn-danger btn-sm" data-action="del-player" data-id="' + p.id + '">Del</button></td>'
+          + '</tr>';
+      }
+      html += '</table>';
+      container.innerHTML = html;
+      // Inline stat editing
+      container.querySelectorAll('.admin-player-stat').forEach(function(inp) {
+        inp.addEventListener('change', async function() {
+          var body = {};
+          body[this.dataset.field] = parseInt(this.value) || 0;
+          try {
+            await api('PUT', '/v1/admin/players/' + this.dataset.pid, body);
+          } catch (e) { alert('Update error: ' + e.message); }
+        });
+      });
+      container.querySelectorAll('[data-action="del-player"]').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          try {
+            await api('DELETE', '/v1/admin/players/' + this.dataset.id);
+            loadAdminPlayers(adminSelectedTeamId);
+          } catch (e) { alert('Error: ' + e.message); }
+        });
+      });
+    }
+  } catch (e) {
+    console.error('Admin players error:', e);
+  }
+}
+
+async function adminAddPlayer() {
+  if (!adminSelectedTeamId) return alert('Select a team first');
+  var name = document.getElementById('admin-new-player-name').value.trim();
+  var position = document.getElementById('admin-new-player-position').value.trim();
+  if (!name) return alert('Enter player name');
+  try {
+    await api('POST', '/v1/admin/players', { name: name, team_id: adminSelectedTeamId, position: position || null });
+    document.getElementById('admin-new-player-name').value = '';
+    document.getElementById('admin-new-player-position').value = '';
+    loadAdminPlayers(adminSelectedTeamId);
+  } catch (e) { alert('Error: ' + e.message); }
+}
+
+// ═══ Match team dropdowns ═══
+async function loadMatchTeamDropdowns(compId) {
+  if (!compId) return;
+  // Use cached teams or fetch
+  var teams = adminTeamsCache[compId];
+  if (!teams) {
+    try {
+      var data = await api('GET', '/v1/admin/competitions/' + compId + '/teams');
+      teams = data.teams || [];
+      adminTeamsCache[compId] = teams;
+    } catch (e) { teams = []; }
+  }
+  var optionsHtml = '<option value="">-- select team --</option>';
+  for (var i = 0; i < teams.length; i++) {
+    optionsHtml += '<option value="' + teams[i].id + '">' + teams[i].name + '</option>';
+  }
+  document.getElementById('admin-match-home-select').innerHTML = optionsHtml;
+  document.getElementById('admin-match-away-select').innerHTML = optionsHtml;
+}
+
+// ═══ Matches ═══
 async function loadAdminMatches(compId) {
   if (!compId) return;
   try {
@@ -1474,9 +1668,9 @@ async function loadAdminMatches(compId) {
         var pubTag = m.published ? '' : ' <span class="badge badge-scheduled">draft</span>';
         var actions = '';
         if (!m.published) {
-          actions += '<button class="btn btn-success btn-sm" data-action="pub-match" data-id="' + m.id + '" style="margin-right:4px;">Publish</button>';
+          actions += '<button class="btn btn-success btn-sm" data-action="pub-match" data-id="' + m.id + '" style="margin-right:4px;">Pub</button>';
         }
-        actions += '<button class="btn btn-outline btn-sm" data-action="view-match" data-id="' + m.id + '" data-label="' + m.home_team + ' vs ' + m.away_team + '" style="margin-right:4px;">View</button>';
+        actions += '<button class="btn btn-outline btn-sm" data-action="view-match" data-id="' + m.id + '" data-label="' + m.home_team + ' vs ' + m.away_team + '" style="margin-right:4px;">Detail</button>';
         if (m.status !== 'finished') {
           actions += '<button class="btn btn-danger btn-sm" data-action="settle-admin" data-id="' + m.id + '" data-home="' + m.home_team + '" data-away="' + m.away_team + '">Settle</button>';
         } else {
@@ -1544,19 +1738,26 @@ async function adminAddCompetition() {
 
 async function adminAddMatch() {
   var compId = document.getElementById('admin-match-comp').value;
-  var home = document.getElementById('admin-match-home').value.trim();
-  var away = document.getElementById('admin-match-away').value.trim();
+  var homeTeamId = document.getElementById('admin-match-home-select').value;
+  var awayTeamId = document.getElementById('admin-match-away-select').value;
   var kickoff = document.getElementById('admin-match-kickoff').value;
-  if (!compId || !home || !away || !kickoff) return alert('Fill in all match fields');
+  if (!compId || !homeTeamId || !awayTeamId || !kickoff) return alert('Select competition, both teams, and kickoff time');
+  if (homeTeamId === awayTeamId) return alert('Home and away teams must be different');
+  // Find team names from cache
+  var teams = adminTeamsCache[compId] || [];
+  var homeTeam = teams.find(function(t) { return t.id === homeTeamId; });
+  var awayTeam = teams.find(function(t) { return t.id === awayTeamId; });
   try {
     await api('POST', '/v1/admin/matches', {
       competition_id: compId,
-      home_team: home,
-      away_team: away,
+      home_team: homeTeam ? homeTeam.name : 'Home',
+      away_team: awayTeam ? awayTeam.name : 'Away',
+      home_team_id: homeTeamId,
+      away_team_id: awayTeamId,
       kickoff_at: new Date(kickoff).toISOString(),
     });
-    document.getElementById('admin-match-home').value = '';
-    document.getElementById('admin-match-away').value = '';
+    document.getElementById('admin-match-home-select').value = '';
+    document.getElementById('admin-match-away-select').value = '';
     loadAdminMatches(compId);
   } catch (e) {
     alert('Error: ' + e.message);
@@ -1678,27 +1879,38 @@ async function loadAdminMatchDetail(matchId, matchLabel) {
   container.classList.remove('hidden');
   container.innerHTML = '<div class="empty">Loading...</div>';
 
+  var currentMatchId = matchId; // store for event adding
   var html = '<div style="font-size:14px;font-weight:700;margin-bottom:8px;">' + matchLabel + '</div>';
 
-  // Load markets (odds)
+  // Load markets (odds — editable)
   try {
-    var mData = await api('GET', '/v1/matches/' + matchId + '/markets');
+    var mData = await api('GET', '/v1/admin/matches/' + matchId + '/markets');
     if (mData.markets && mData.markets.length > 0) {
+      html += '<div style="font-size:12px;font-weight:700;color:#6b7280;margin-bottom:4px;">MATCH MARKETS</div>';
       for (var i = 0; i < mData.markets.length; i++) {
         var mk = mData.markets[i];
         html += '<div style="background:#252636;border-radius:8px;padding:10px;margin-bottom:8px;">'
           + '<div style="font-size:13px;font-weight:600;">' + mk.type.replace(/_/g, ' ') + ' <span class="badge badge-' + (mk.status === 'open' ? 'open' : 'lost') + '">' + mk.status + '</span></div>';
-        html += '<div class="options" style="margin-top:6px;">';
+        html += '<div style="margin-top:6px;">';
         for (var j = 0; j < mk.options.length; j++) {
           var o = mk.options[j];
-          var oddsVal = o.odds ? Number(o.odds).toFixed(2) : '-';
-          var isCorrect = o.is_correct ? ' style="border-color:#4ade80;background:#064e3b;"' : '';
-          html += '<div class="option-btn"' + isCorrect + '>'
-            + '<div class="option-label">' + o.label + '</div>'
-            + '<div class="option-odds">' + oddsVal + '</div>'
+          var isWinner = o.is_winner ? ' style="color:#4ade80;font-weight:700;"' : '';
+          html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">'
+            + '<span' + isWinner + ' style="flex:1;font-size:13px;">' + o.label + (o.is_winner ? ' &#10003;' : '') + '</span>'
+            + '<label style="font-size:11px;color:#6b7280;">Odds:</label>'
+            + '<input type="number" step="0.1" min="1" value="' + (o.odds || '') + '" class="admin-odds-input" data-option-id="' + o.id + '" style="width:65px;padding:4px;font-size:13px;text-align:center;" />'
             + '</div>';
         }
-        html += '</div></div>';
+        html += '</div>';
+        // Settle market button
+        if (mk.status === 'open') {
+          html += '<div style="margin-top:6px;">';
+          for (var sj = 0; sj < mk.options.length; sj++) {
+            html += '<button class="btn btn-outline btn-sm" data-action="settle-market" data-market-id="' + mk.id + '" data-option-id="' + mk.options[sj].id + '" style="margin-right:4px;margin-bottom:4px;font-size:11px;">' + mk.options[sj].label + ' wins</button>';
+          }
+          html += '</div>';
+        }
+        html += '</div>';
       }
     } else {
       html += '<div class="empty">No markets</div>';
@@ -1709,31 +1921,111 @@ async function loadAdminMatchDetail(matchId, matchLabel) {
 
   // Load events
   try {
-    var eData = await api('GET', '/v1/matches/' + matchId + '/events');
+    var eData = await api('GET', '/v1/admin/matches/' + matchId + '/events');
     if (eData.events && eData.events.length > 0) {
-      html += '<div style="font-size:13px;font-weight:700;color:#6b7280;margin:8px 0 4px;">IN-MATCH EVENTS</div>';
+      html += '<div style="font-size:12px;font-weight:700;color:#6b7280;margin:10px 0 4px;">IN-MATCH EVENTS</div>';
       for (var ei = 0; ei < eData.events.length; ei++) {
         var evt = eData.events[ei];
         html += '<div style="background:#252636;border-radius:8px;padding:10px;margin-bottom:8px;">'
           + '<div style="font-size:13px;font-weight:600;">' + (evt.question || 'Event') + ' <span class="badge badge-' + (evt.status === 'open' ? 'open' : 'lost') + '">' + evt.status + '</span></div>';
-        html += '<div class="options" style="margin-top:6px;">';
+        html += '<div style="margin-top:6px;">';
         for (var ej = 0; ej < evt.options.length; ej++) {
           var eo = evt.options[ej];
-          var eOddsVal = eo.odds ? Number(eo.odds).toFixed(2) : '-';
-          html += '<div class="option-btn">'
-            + '<div class="option-label">' + eo.label + '</div>'
-            + '<div class="option-odds">' + eOddsVal + '</div>'
+          var evtWinner = eo.is_winner ? ' style="color:#4ade80;font-weight:700;"' : '';
+          html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">'
+            + '<span' + evtWinner + ' style="flex:1;font-size:13px;">' + eo.label + (eo.is_winner ? ' &#10003;' : '') + '</span>'
+            + '<label style="font-size:11px;color:#6b7280;">Odds:</label>'
+            + '<input type="number" step="0.1" min="1" value="' + (eo.odds || '') + '" class="admin-odds-input" data-option-id="' + eo.id + '" style="width:65px;padding:4px;font-size:13px;text-align:center;" />'
             + '</div>';
         }
-        html += '</div></div>';
+        html += '</div>';
+        // Settle event
+        if (evt.status === 'open') {
+          html += '<div style="margin-top:6px;">';
+          for (var sk = 0; sk < evt.options.length; sk++) {
+            html += '<button class="btn btn-outline btn-sm" data-action="settle-market" data-market-id="' + evt.id + '" data-option-id="' + evt.options[sk].id + '" style="margin-right:4px;margin-bottom:4px;font-size:11px;">' + evt.options[sk].label + ' wins</button>';
+          }
+          html += '</div>';
+        }
+        html += '</div>';
       }
     }
   } catch (evtErr) {
     // no events, that's OK
   }
 
-  html += '<button class="btn btn-outline btn-sm btn-block" onclick="document.getElementById(\'admin-match-detail\').classList.add(\'hidden\');">Close</button>';
+  // Add event form
+  html += '<div style="background:#1a1b23;border-radius:8px;padding:10px;margin-top:10px;">'
+    + '<div style="font-size:12px;font-weight:700;color:#6b7280;margin-bottom:6px;">ADD IN-MATCH EVENT</div>'
+    + '<div class="form-group"><input id="admin-event-question" placeholder="Question (e.g. Who scores first?)" style="font-size:12px;padding:6px 8px;" /></div>'
+    + '<div id="admin-event-options-list">'
+    + '<div style="display:flex;gap:4px;margin-bottom:4px;"><input class="admin-event-opt-label" placeholder="Option label" style="flex:2;font-size:12px;padding:4px 6px;" /><input class="admin-event-opt-odds" type="number" step="0.1" min="1" placeholder="Odds" style="flex:1;font-size:12px;padding:4px 6px;" /></div>'
+    + '<div style="display:flex;gap:4px;margin-bottom:4px;"><input class="admin-event-opt-label" placeholder="Option label" style="flex:2;font-size:12px;padding:4px 6px;" /><input class="admin-event-opt-odds" type="number" step="0.1" min="1" placeholder="Odds" style="flex:1;font-size:12px;padding:4px 6px;" /></div>'
+    + '</div>'
+    + '<div style="display:flex;gap:6px;margin-top:6px;">'
+    + '<button class="btn btn-outline btn-sm" onclick="addEventOptionRow()">+ Option</button>'
+    + '<button class="btn btn-success btn-sm" onclick="adminAddEvent(\'' + matchId + '\')">Create Event</button>'
+    + '</div></div>';
+
+  html += '<button class="btn btn-outline btn-sm btn-block" style="margin-top:8px;" onclick="document.getElementById(\'admin-match-detail\').classList.add(\'hidden\');">Close</button>';
   container.innerHTML = html;
+
+  // Bind odds editing (save on blur/change)
+  container.querySelectorAll('.admin-odds-input').forEach(function(inp) {
+    inp.addEventListener('change', async function() {
+      var newOdds = parseFloat(this.value);
+      if (isNaN(newOdds) || newOdds < 1) return;
+      try {
+        await api('PUT', '/v1/admin/market-options/' + this.dataset.optionId, { odds: newOdds });
+        this.style.borderColor = '#4ade80';
+        setTimeout(function() { inp.style.borderColor = ''; }, 1000);
+      } catch (e) { alert('Error updating odds: ' + e.message); }
+    });
+  });
+
+  // Bind settle buttons
+  container.querySelectorAll('[data-action="settle-market"]').forEach(function(btn) {
+    btn.addEventListener('click', async function() {
+      if (!confirm('Settle this market? This will resolve all bets.')) return;
+      try {
+        await api('POST', '/v1/admin/markets/' + this.dataset.marketId + '/settle', { winning_option_id: this.dataset.optionId });
+        alert('Market settled!');
+        loadAdminMatchDetail(currentMatchId, matchLabel);
+      } catch (e) { alert('Settle error: ' + e.message); }
+    });
+  });
+}
+
+function addEventOptionRow() {
+  var list = document.getElementById('admin-event-options-list');
+  var row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:4px;margin-bottom:4px;';
+  row.innerHTML = '<input class="admin-event-opt-label" placeholder="Option label" style="flex:2;font-size:12px;padding:4px 6px;" />'
+    + '<input class="admin-event-opt-odds" type="number" step="0.1" min="1" placeholder="Odds" style="flex:1;font-size:12px;padding:4px 6px;" />';
+  list.appendChild(row);
+}
+
+async function adminAddEvent(matchId) {
+  var question = document.getElementById('admin-event-question').value.trim();
+  if (!question) return alert('Enter a question');
+  var labels = document.querySelectorAll('.admin-event-opt-label');
+  var oddsInputs = document.querySelectorAll('.admin-event-opt-odds');
+  var options = [];
+  for (var i = 0; i < labels.length; i++) {
+    var label = labels[i].value.trim();
+    var odds = parseFloat(oddsInputs[i].value) || null;
+    if (label) {
+      options.push({ label: label, outcome_key: label.toLowerCase().replace(/\s+/g, '_'), odds: odds });
+    }
+  }
+  if (options.length < 2) return alert('Add at least 2 options');
+  try {
+    await api('POST', '/v1/admin/matches/' + matchId + '/events', { question: question, options: options });
+    // Refresh the match detail panel
+    var matchLabel = document.querySelector('#admin-match-detail > div:first-child');
+    var label = matchLabel ? matchLabel.textContent : '';
+    loadAdminMatchDetail(matchId, label);
+  } catch (e) { alert('Error: ' + e.message); }
 }
 
 // --- Information screen ---
@@ -1998,9 +2290,16 @@ document.getElementById('btn-join-group').addEventListener('click', joinGroup);
 document.getElementById('btn-add-comp').addEventListener('click', addCompetition);
 document.getElementById('btn-admin-add-comp').addEventListener('click', adminAddCompetition);
 document.getElementById('btn-admin-add-match').addEventListener('click', adminAddMatch);
+document.getElementById('btn-admin-add-team').addEventListener('click', adminAddTeam);
+document.getElementById('btn-admin-add-player').addEventListener('click', adminAddPlayer);
 document.getElementById('btn-update-profile').addEventListener('click', updateProfile);
 document.getElementById('admin-match-comp').addEventListener('change', function() {
   loadAdminMatches(this.value);
+  loadMatchTeamDropdowns(this.value);
+});
+document.getElementById('admin-teams-comp').addEventListener('change', function() {
+  loadAdminTeams(this.value);
+  document.getElementById('admin-players-panel').classList.add('hidden');
 });
 document.getElementById('info-comp-select').addEventListener('change', function() {
   loadInfoContent(this.value);
