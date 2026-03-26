@@ -43,9 +43,20 @@ export interface PlaceBetResult {
 export async function placeBet(params: PlaceBetParams): Promise<PlaceBetResult> {
   const { userId, groupId, marketOptionId, predictedHomeScore, predictedAwayScore, correlationId } = params;
 
-  // Check for existing bet on same option (idempotency)
+  // Check for existing bet on same option
   const existingBet = await queries.findExistingBet(userId, groupId, marketOptionId);
   if (existingBet) {
+    // If score prediction changed, update it
+    if (predictedHomeScore != null && predictedAwayScore != null &&
+        (existingBet.predicted_home_score !== predictedHomeScore || existingBet.predicted_away_score !== predictedAwayScore)) {
+      const db = getDb();
+      await db('bets').where('id', existingBet.id).update({
+        predicted_home_score: predictedHomeScore,
+        predicted_away_score: predictedAwayScore,
+      });
+      existingBet.predicted_home_score = predictedHomeScore;
+      existingBet.predicted_away_score = predictedAwayScore;
+    }
     const option = await queries.findMarketOptionById(marketOptionId);
     return { bet: existingBet, marketOption: option!, isExisting: true };
   }

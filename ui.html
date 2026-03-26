@@ -1082,13 +1082,16 @@ async function toggleMarkets(matchId) {
   try {
     var data = await api('GET', '/v1/matches/' + matchId + '/markets');
     var html = '';
+    var matchMarketOptionIds = []; // track option IDs belonging to this match
     for (var i = 0; i < data.markets.length; i++) {
       var market = data.markets[i];
-      var typeLabel = market.type.replace(/_/g, ' ');
+      // Skip in_match_event — they're loaded separately from the events endpoint
+      if (market.type === 'in_match_event') continue;
 
       if (isPointsFormat && market.type === 'match_outcome') {
         // Points format: show score prediction inputs
         var firstOpt = market.options[0];
+        if (firstOpt) matchMarketOptionIds.push(firstOpt.id);
         html += '<div class="card" style="margin: 8px 0;">'
           + '<div class="card-title">Predict Score <span class="badge badge-open">3pts exact / 2pts diff / 1pt winner</span></div>'
           + '<div class="score-predict">'
@@ -1098,23 +1101,37 @@ async function toggleMarkets(matchId) {
           + '</div>'
           + '<button class="btn btn-primary btn-block btn-sm" data-action="place-score-bet" data-match="' + matchId + '" data-option="' + firstOpt.id + '">Submit Prediction</button>'
           + '</div>';
-      } else {
-        // Betting format: show outcome buttons with odds
+      } else if (isPointsFormat) {
+        // Points format non-outcome markets: show options with "1pt"
         html += '<div class="card" style="margin: 8px 0;">'
-          + '<div class="card-title">' + typeLabel + ' <span class="badge badge-open">' + market.status + '</span></div>'
+          + '<div class="card-title">' + market.type.replace(/_/g, ' ') + ' <span class="badge badge-open">1pt per correct</span></div>'
           + '<div class="options">';
         for (var j = 0; j < market.options.length; j++) {
           var opt = market.options[j];
-          var oddsText = isPointsFormat && market.type !== 'match_outcome' ? '1pt' : (opt.odds ? Number(opt.odds).toFixed(1) : '-');
+          matchMarketOptionIds.push(opt.id);
           html += '<div class="option-btn" data-action="place-bet" data-option="' + opt.id + '" data-label="' + opt.label + '">'
             + '<div class="option-label">' + opt.label + '</div>'
-            + '<div class="option-odds">' + oddsText + '</div>'
+            + '<div class="option-odds">1pt</div>'
+            + '</div>';
+        }
+        html += '</div></div>';
+      } else {
+        // Betting format: show outcome buttons with odds
+        html += '<div class="card" style="margin: 8px 0;">'
+          + '<div class="card-title">' + market.type.replace(/_/g, ' ') + ' <span class="badge badge-open">' + market.status + '</span></div>'
+          + '<div class="options">';
+        for (var j2 = 0; j2 < market.options.length; j2++) {
+          var opt2 = market.options[j2];
+          matchMarketOptionIds.push(opt2.id);
+          html += '<div class="option-btn" data-action="place-bet" data-option="' + opt2.id + '" data-label="' + opt2.label + '">'
+            + '<div class="option-label">' + opt2.label + '</div>'
+            + '<div class="option-odds">' + (opt2.odds ? Number(opt2.odds).toFixed(1) : '-') + '</div>'
             + '</div>';
         }
         html += '</div></div>';
       }
     }
-    // Also load in-match events
+    // Also load in-match events (separate endpoint to avoid double-display)
     try {
       var eventsData = await api('GET', '/v1/matches/' + matchId + '/events');
       if (eventsData.events && eventsData.events.length > 0) {
@@ -1126,6 +1143,7 @@ async function toggleMarkets(matchId) {
             + '<div class="options">';
           for (var ej = 0; ej < evt.options.length; ej++) {
             var eo = evt.options[ej];
+            matchMarketOptionIds.push(eo.id);
             var eOddsDisplay = isPointsFormat ? '1pt' : (eo.odds ? Number(eo.odds).toFixed(1) : '-');
             html += '<div class="option-btn" data-action="place-bet" data-option="' + eo.id + '" data-label="' + eo.label + '">'
               + '<div class="option-label">' + eo.label + '</div>'
@@ -1161,15 +1179,15 @@ async function toggleMarkets(matchId) {
       }
     });
 
-    // Pre-populate score predictions if existing bet has predicted scores
+    // Pre-populate score predictions if existing bet has predicted scores (only for THIS match)
     betsData.bets.forEach(function(b) {
-      if (b.status === 'pending' && b.predicted_home_score !== undefined && b.predicted_home_score !== null) {
+      if (b.status === 'pending' && b.predicted_home_score !== undefined && b.predicted_home_score !== null
+          && b.market_option && matchMarketOptionIds.indexOf(b.market_option.id) !== -1) {
         var homeInput = document.getElementById('predict-home-' + matchId);
         var awayInput = document.getElementById('predict-away-' + matchId);
         if (homeInput && awayInput) {
           homeInput.value = b.predicted_home_score;
           awayInput.value = b.predicted_away_score;
-          // Update button text to indicate update
           var scoreBtn = container.querySelector('[data-action="place-score-bet"][data-match="' + matchId + '"]');
           if (scoreBtn) scoreBtn.textContent = 'Update Prediction';
         }
@@ -1255,9 +1273,8 @@ async function placeScoreBet(optionId, homeScore, awayScore, el) {
       predicted_home_score: homeScore,
       predicted_away_score: awayScore,
     });
-    el.textContent = 'Submitted!';
-    el.disabled = true;
-    log('Score prediction placed: ' + homeScore + '-' + awayScore, 'success');
+    el.textContent = 'Update Prediction';
+    log('Score prediction: ' + homeScore + '-' + awayScore, 'success');
     await Promise.all([loadBets(), loadLeaderboard()]);
   } catch (e) {
     alert('Bet failed: ' + e.message);
@@ -1327,12 +1344,30 @@ async function loadBets() {
       return;
     }
 
+    var activeGroup = getActiveGroup();
+    var isPoints = activeGroup && activeGroup.scoring_format === 'points';
+
     var html = '';
     for (var i = 0; i < data.bets.length; i++) {
       var bet = data.bets[i];
+      // Skip void bets
+      if (bet.status === 'void') continue;
+
       var matchInfo = bet.market && bet.market.match ? bet.market.match.home_team + ' vs ' + bet.market.match.away_team : 'Outright';
-      var statusCls = bet.status === 'won' ? 'badge-won' : bet.status === 'lost' ? 'badge-lost' : bet.status === 'void' ? 'badge-scheduled' : 'badge-pending';
-      var oddsInfo = bet.market_option && bet.market_option.odds ? ' @ ' + Number(bet.market_option.odds).toFixed(1) : '';
+      var betType = bet.market && bet.market.type ? bet.market.type.replace(/_/g, ' ') : '';
+      var statusCls = bet.status === 'won' ? 'badge-won' : bet.status === 'lost' ? 'badge-lost' : 'badge-pending';
+
+      // Title line: different for points vs betting format
+      var titleLine = '';
+      if (isPoints) {
+        // Points format: "Arsenal vs Chelsea — match outcome" or "Who scores first? — event"
+        titleLine = matchInfo;
+        if (betType && betType !== 'match outcome') titleLine += ' — ' + betType;
+      } else {
+        // Betting format: "maccabi @ 2.5"
+        var oddsInfo = bet.market_option && bet.market_option.odds ? ' @ ' + Number(bet.market_option.odds).toFixed(1) : '';
+        titleLine = (bet.market_option ? bet.market_option.label : '?') + oddsInfo;
+      }
 
       // Match result info
       var resultLine = '';
@@ -1346,23 +1381,29 @@ async function loadBets() {
       // Winning option
       var winningLine = '';
       if (bet.market && bet.market.winning_option) {
-        winningLine = 'Winning: ' + bet.market.winning_option;
+        winningLine = 'Correct: ' + bet.market.winning_option;
       }
 
-      // User's guess vs actual
+      // User's guess
       var guessLine = 'Your pick: ' + (bet.market_option ? bet.market_option.label : '?');
       if (bet.predicted_home_score !== undefined && bet.predicted_home_score !== null) {
-        guessLine += ' (' + bet.predicted_home_score + '-' + bet.predicted_away_score + ')';
+        guessLine = 'Your prediction: ' + bet.predicted_home_score + ' - ' + bet.predicted_away_score;
       }
 
+      // Outcome indicator for settled bets
+      var outcomeIcon = '';
+      if (bet.status === 'won') outcomeIcon = ' <span style="color:#4ade80;">&#10003;</span>';
+      if (bet.status === 'lost') outcomeIcon = ' <span style="color:#f87171;">&#10007;</span>';
+
       html += '<div class="card">'
-        + '<div class="card-title">' + (bet.market_option ? bet.market_option.label : '?') + oddsInfo + ' <span class="badge ' + statusCls + '">' + bet.status + '</span></div>'
+        + '<div class="card-title">' + titleLine + outcomeIcon + ' <span class="badge ' + statusCls + '">' + bet.status + '</span></div>'
         + '<div style="font-size:12px;color:#6b7280">' + matchInfo + '</div>'
         + '<div style="font-size:11px;color:#9ca3af;margin-top:4px;">' + guessLine + '</div>'
         + (resultLine ? '<div style="font-size:11px;color:#9ca3af;">' + resultLine + '</div>' : '')
         + (winningLine ? '<div style="font-size:11px;color:#fbbf24;">' + winningLine + '</div>' : '')
         + '</div>';
     }
+    if (!html) html = '<div class="empty">No active bets</div>';
     container.innerHTML = html;
   } catch (e) {
     console.error('Bets error:', e);
