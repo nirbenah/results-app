@@ -938,6 +938,46 @@ async function toggleMarkets(matchId) {
         placeScoreBet(optId, homeScore, awayScore, this);
       });
     });
+    // Also load in-match events
+    try {
+      var eventsData = await api('GET', '/v1/matches/' + matchId + '/events');
+      if (eventsData.events && eventsData.events.length > 0) {
+        for (var ei = 0; ei < eventsData.events.length; ei++) {
+          var evt = eventsData.events[ei];
+          if (evt.status !== 'open') continue;
+          html += '<div class="card" style="margin: 8px 0;">'
+            + '<div class="card-title">' + (evt.question || 'Event') + ' <span class="badge badge-open">event</span></div>'
+            + '<div class="options">';
+          for (var ej = 0; ej < evt.options.length; ej++) {
+            var eo = evt.options[ej];
+            var eOdds = eo.odds ? Number(eo.odds).toFixed(1) : '-';
+            html += '<div class="option-btn" data-action="place-bet" data-option="' + eo.id + '" data-label="' + eo.label + '">'
+              + '<div class="option-label">' + eo.label + '</div>'
+              + '<div class="option-odds">' + eOdds + '</div>'
+              + '</div>';
+          }
+          html += '</div></div>';
+        }
+      }
+    } catch (evtErr) {
+      // Events endpoint may not exist yet, ignore
+    }
+
+    container.innerHTML = html;
+    container.classList.remove('hidden');
+
+    container.querySelectorAll('[data-action="place-bet"]').forEach(function(btn) {
+      btn.addEventListener('click', function() { placeBet(this.dataset.option, this.dataset.label, this); });
+    });
+    container.querySelectorAll('[data-action="place-score-bet"]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var mid = this.dataset.match;
+        var optId = this.dataset.option;
+        var homeScore = parseInt(document.getElementById('predict-home-' + mid).value) || 0;
+        var awayScore = parseInt(document.getElementById('predict-away-' + mid).value) || 0;
+        placeScoreBet(optId, homeScore, awayScore, this);
+      });
+    });
   } catch (e) {
     alert('Markets error: ' + e.message);
   }
@@ -1102,13 +1142,49 @@ async function loadLeaderboard() {
 
       html += '<div class="lb-row ' + highlight + '">'
         + '<div class="lb-rank ' + rankCls + '">' + rankDisplay + '</div>'
-        + '<div class="lb-name">' + entry.user.username + (isMe ? ' (you)' : '') + '</div>'
+        + '<div class="lb-name" style="cursor:pointer;text-decoration:underline;" data-action="view-user-bets" data-user-id="' + entry.user.id + '" data-username="' + entry.user.username + '">' + entry.user.username + (isMe ? ' (you)' : '') + '</div>'
         + '<div class="lb-stats">' + statsText + '</div>'
         + '</div>';
     }
     container.innerHTML = html;
+
+    // Click on username → view their bets
+    container.querySelectorAll('[data-action="view-user-bets"]').forEach(function(el) {
+      el.addEventListener('click', function() {
+        viewUserBets(this.dataset.userId, this.dataset.username);
+      });
+    });
   } catch (e) {
     console.error('Leaderboard error:', e);
+  }
+}
+
+async function viewUserBets(userId, username) {
+  if (!state.activeGroupId) return;
+  try {
+    var data = await api('GET', '/v1/users/' + userId + '/bets?group_id=' + state.activeGroupId);
+    var html = '<div class="section-title" style="margin-bottom:10px;">' + username + '\'s Bets</div>';
+    if (data.bets.length === 0) {
+      html += '<div class="empty">No visible bets</div>';
+    } else {
+      for (var i = 0; i < data.bets.length; i++) {
+        var b = data.bets[i];
+        var statusBadge = '<span class="badge badge-' + b.status + '">' + b.status + '</span>';
+        var matchInfo = b.match ? b.match.home_team + ' vs ' + b.match.away_team : (b.question || 'Outright');
+        var prediction = b.predicted_score ? ' (' + b.predicted_score + ')' : '';
+        html += '<div class="card" style="padding:10px;">'
+          + '<div style="font-size:13px;font-weight:600;">' + matchInfo + '</div>'
+          + '<div style="font-size:12px;color:#9ca3af;">' + b.option_label + prediction + ' ' + statusBadge + '</div>'
+          + '<div style="font-size:11px;color:#6b7280;">' + new Date(b.placed_at).toLocaleString() + '</div>'
+          + '</div>';
+      }
+    }
+    html += '<button class="btn btn-outline btn-block btn-sm" style="margin-top:8px;" onclick="showScreen(\'leaderboard\');loadLeaderboard();">Back to Leaderboard</button>';
+
+    // Show in the bets screen
+    document.getElementById('screen-leaderboard').querySelector('#leaderboard-list').innerHTML = html;
+  } catch (e) {
+    alert('Error loading bets: ' + e.message);
   }
 }
 
@@ -1171,11 +1247,13 @@ async function loadAdminCompetitions() {
     if (!data.competitions.length) {
       container.innerHTML = '<div class="empty">No competitions</div>';
     } else {
-      var html = '<table class="admin-table"><tr><th>Name</th><th>Sport</th><th>Type</th><th></th></tr>';
+      var html = '<table class="admin-table"><tr><th>Name</th><th>Status</th><th></th></tr>';
       for (var i = 0; i < data.competitions.length; i++) {
         var c = data.competitions[i];
-        html += '<tr><td>' + c.name + '</td><td>' + c.sport + '</td><td>' + c.type + '</td>'
-          + '<td><button class="btn btn-danger btn-sm" data-action="del-comp" data-id="' + c.id + '">Del</button></td></tr>';
+        var pubBadge = c.published ? '<span class="badge badge-active">published</span>' : '<span class="badge badge-scheduled">draft</span>';
+        var pubBtn = !c.published ? '<button class="btn btn-success btn-sm" data-action="pub-comp" data-id="' + c.id + '" style="margin-right:4px;">Publish</button>' : '';
+        html += '<tr><td>' + c.name + '</td><td>' + pubBadge + '</td>'
+          + '<td>' + pubBtn + '<button class="btn btn-danger btn-sm" data-action="del-comp" data-id="' + c.id + '">Del</button></td></tr>';
       }
       html += '</table>';
       container.innerHTML = html;
@@ -1185,6 +1263,13 @@ async function loadAdminCompetitions() {
             await api('DELETE', '/v1/admin/competitions/' + this.dataset.id);
             loadAdminCompetitions();
           }
+        });
+      });
+      container.querySelectorAll('[data-action="pub-comp"]').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          await api('PUT', '/v1/admin/competitions/' + this.dataset.id + '/publish');
+          loadAdminCompetitions();
+          loadCompetitions();
         });
       });
     }
@@ -1211,10 +1296,17 @@ async function loadAdminMatches(compId) {
       for (var i = 0; i < data.matches.length; i++) {
         var m = data.matches[i];
         var ko = new Date(m.kickoff_at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-        var actions = m.status !== 'finished'
-          ? '<button class="btn btn-danger btn-sm" data-action="settle-admin" data-id="' + m.id + '" data-home="' + m.home_team + '" data-away="' + m.away_team + '">Settle</button>'
-          : '<span class="badge badge-lost">done</span>';
-        html += '<tr><td>' + m.home_team + ' vs ' + m.away_team + '</td><td>' + m.status + '</td><td>' + ko + '</td><td>' + actions + '</td></tr>';
+        var pubTag = m.published ? '' : ' <span class="badge badge-scheduled">draft</span>';
+        var actions = '';
+        if (!m.published) {
+          actions += '<button class="btn btn-success btn-sm" data-action="pub-match" data-id="' + m.id + '" style="margin-right:4px;">Publish</button>';
+        }
+        if (m.status !== 'finished') {
+          actions += '<button class="btn btn-danger btn-sm" data-action="settle-admin" data-id="' + m.id + '" data-home="' + m.home_team + '" data-away="' + m.away_team + '">Settle</button>';
+        } else {
+          actions += '<span class="badge badge-lost">done</span>';
+        }
+        html += '<tr><td>' + m.home_team + ' vs ' + m.away_team + pubTag + '</td><td>' + m.status + '</td><td>' + ko + '</td><td>' + actions + '</td></tr>';
       }
       html += '</table>';
       container.innerHTML = html;
@@ -1226,6 +1318,13 @@ async function loadAdminMatches(compId) {
           if (hs !== null && as !== null) {
             doAdminSettle(mid, parseInt(hs) || 0, parseInt(as) || 0);
           }
+        });
+      });
+      container.querySelectorAll('[data-action="pub-match"]').forEach(function(btn) {
+        btn.addEventListener('click', async function() {
+          await api('PUT', '/v1/admin/matches/' + this.dataset.id + '/publish');
+          var compId = document.getElementById('admin-match-comp').value;
+          if (compId) loadAdminMatches(compId);
         });
       });
     }

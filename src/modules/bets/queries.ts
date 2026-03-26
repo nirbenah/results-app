@@ -22,7 +22,7 @@ export interface CompetitionFilters {
 export async function findCompetitions(
   filters: CompetitionFilters
 ): Promise<CompetitionRow[]> {
-  const qb = getDb()('competitions').select('*');
+  const qb = getDb()('competitions').select('*').where('published', true);
   if (filters.sport) qb.where('sport', filters.sport);
   if (filters.country) qb.where('country', filters.country);
   if (filters.type) qb.where('type', filters.type);
@@ -54,6 +54,7 @@ export async function findMatchesByCompetition(
   const qb = getDb()('matches')
     .select('*')
     .where('competition_id', competitionId)
+    .where('published', true)
     .orderBy('kickoff_at', 'asc');
   if (filters.status) qb.where('status', filters.status);
   if (filters.from) qb.where('kickoff_at', '>=', filters.from);

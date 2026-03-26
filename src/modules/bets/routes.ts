@@ -158,6 +158,133 @@ router.get('/bets', async (req: Request, res: Response, next: NextFunction) => {
   }
 });
 
+// ─── GET /v1/competitions/:id/teams (public) ───
+
+router.get(
+  '/competitions/:competitionId/teams',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rows = await (await import('../../shared/db')).getDb()('teams')
+        .where('competition_id', req.params.competitionId)
+        .select('id', 'name', 'short_name', 'photo_url')
+        .orderBy('name', 'asc');
+      res.json({ teams: rows });
+    } catch (err) { next(err); }
+  }
+);
+
+// ─── GET /v1/teams/:id/players (public) ───
+
+router.get(
+  '/teams/:teamId/players',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const rows = await (await import('../../shared/db')).getDb()('players')
+        .where('team_id', req.params.teamId)
+        .select('id', 'name', 'position', 'photo_url')
+        .orderBy('name', 'asc');
+      res.json({ players: rows });
+    } catch (err) { next(err); }
+  }
+);
+
+// ─── GET /v1/matches/:matchId/events (public — in-match event markets) ───
+
+router.get(
+  '/matches/:matchId/events',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const db = (await import('../../shared/db')).getDb();
+      const markets = await db('markets')
+        .where('match_id', req.params.matchId)
+        .where('type', 'in_match_event')
+        .select('*');
+
+      const marketIds = markets.map((m: { id: string }) => m.id);
+      const options = marketIds.length > 0
+        ? await db('market_options').whereIn('market_id', marketIds).select('*')
+        : [];
+
+      const events = markets.map((m: Record<string, unknown>) => ({
+        ...m,
+        options: options
+          .filter((o: { market_id: string }) => o.market_id === m.id)
+          .map((o: Record<string, unknown>) => ({
+            id: o.id, label: o.label, outcome_key: o.outcome_key, odds: o.odds,
+          })),
+      }));
+      res.json({ events });
+    } catch (err) { next(err); }
+  }
+);
+
+// ─── GET /v1/users/:userId/bets?group_id=... — View another user's bet history ───
+
+router.get('/users/:userId/bets', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const viewerId = req.userId;
+    const targetUserId = req.params.userId;
+    const { group_id } = req.query as Record<string, string | undefined>;
+
+    if (!viewerId) throw new BadRequestError('AUTH_REQUIRED', 'Authentication is required');
+    if (!group_id) throw new BadRequestError('VALIDATION', 'group_id query parameter is required');
+
+    // Both must be in the same group
+    const db = (await import('../../shared/db')).getDb();
+    const viewerMember = await db('group_members').where({ user_id: viewerId, group_id }).first();
+    if (!viewerMember) throw new BadRequestError('NOT_MEMBER', 'You are not a member of this group');
+
+    const targetMember = await db('group_members').where({ user_id: targetUserId, group_id }).first();
+    if (!targetMember) throw new BadRequestError('NOT_MEMBER', 'User is not a member of this group');
+
+    const isSelf = viewerId === targetUserId;
+
+    // Get bets with full details
+    let qb = db('bets')
+      .join('market_options', 'market_options.id', 'bets.market_option_id')
+      .join('markets', 'markets.id', 'market_options.market_id')
+      .leftJoin('matches', 'matches.id', 'markets.match_id')
+      .where('bets.user_id', targetUserId)
+      .where('bets.group_id', group_id)
+      .select(
+        'bets.id', 'bets.status', 'bets.placed_at', 'bets.settled_at',
+        'bets.predicted_home_score', 'bets.predicted_away_score',
+        'market_options.label as option_label',
+        'market_options.odds',
+        'markets.type as market_type',
+        'markets.question',
+        'matches.home_team', 'matches.away_team',
+        'matches.status as match_status'
+      )
+      .orderBy('bets.placed_at', 'desc');
+
+    if (!isSelf) {
+      // Hide bets on unplayed matches (only show finished/live match bets + outrights)
+      qb = qb.where(function() {
+        this.whereNull('markets.match_id') // outright / competition bets — always visible
+          .orWhereIn('matches.status', ['finished', 'live', 'cancelled']);
+      });
+    }
+
+    const rows = await qb;
+
+    const bets = rows.map((b: Record<string, unknown>) => ({
+      id: b.id,
+      status: b.status,
+      option_label: b.option_label,
+      odds: b.odds,
+      market_type: b.market_type,
+      question: b.question,
+      match: b.home_team ? { home_team: b.home_team, away_team: b.away_team, status: b.match_status } : null,
+      predicted_score: b.predicted_home_score != null ? `${b.predicted_home_score}-${b.predicted_away_score}` : null,
+      placed_at: b.placed_at,
+      settled_at: b.settled_at,
+    }));
+
+    res.json({ bets });
+  } catch (err) { next(err); }
+});
+
 // ─── Helpers ───
 
 function formatMarket(m: queries.MarketWithOptions) {

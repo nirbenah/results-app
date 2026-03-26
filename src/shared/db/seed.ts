@@ -3,10 +3,10 @@
  * Run: npx ts-node src/shared/db/seed.ts
  *
  * Creates:
- * - 2 competitions (Premier League 24/25, Champions League 24/25)
- * - 6 matches (3 per competition)
- * - 10 players
- * - Markets + options with odds for each match
+ * - 2 competitions with teams and players
+ * - 6 matches with match_outcome markets
+ * - Competition special markets (top goalscorer, outright winner)
+ * - All data is published by default (for testing)
  */
 import dotenv from 'dotenv';
 dotenv.config();
@@ -35,6 +35,7 @@ async function seed() {
       country: 'England',
       starts_at: '2024-08-17T00:00:00Z',
       ends_at: '2025-05-25T00:00:00Z',
+      published: true,
     })
     .returning('*');
 
@@ -45,23 +46,45 @@ async function seed() {
       sport: 'football',
       starts_at: '2024-09-17T00:00:00Z',
       ends_at: '2025-06-01T00:00:00Z',
+      published: true,
     })
     .returning('*');
 
   console.log('[Seed] Competitions created');
 
-  // ─── Players ───
+  // ─── Teams ───
+  const plTeamNames = ['Arsenal', 'Chelsea', 'Liverpool', 'Manchester City', 'Tottenham', 'Manchester United', 'Newcastle', 'Aston Villa'];
+  const plTeams: Record<string, { id: string; name: string }> = {};
+  for (const name of plTeamNames) {
+    const [row] = await db('teams')
+      .insert({ competition_id: premierLeague.id, name })
+      .returning('*');
+    plTeams[name] = row;
+  }
+
+  const clTeamNames = ['Arsenal', 'Liverpool', 'Manchester City', 'Barcelona', 'Real Madrid', 'Bayern Munich'];
+  const clTeams: Record<string, { id: string; name: string }> = {};
+  for (const name of clTeamNames) {
+    const [row] = await db('teams')
+      .insert({ competition_id: championsLeague.id, name })
+      .returning('*');
+    clTeams[name] = row;
+  }
+
+  console.log('[Seed] Teams created');
+
+  // ─── Players (linked to PL teams) ───
   const playerData = [
-    { name: 'Bukayo Saka', team: 'Arsenal', position: 'RW' },
-    { name: 'Kai Havertz', team: 'Arsenal', position: 'CF' },
-    { name: 'Mohamed Salah', team: 'Liverpool', position: 'RW' },
-    { name: 'Erling Haaland', team: 'Manchester City', position: 'ST' },
-    { name: 'Cole Palmer', team: 'Chelsea', position: 'AM' },
-    { name: 'Bruno Fernandes', team: 'Manchester United', position: 'AM' },
-    { name: 'Son Heung-min', team: 'Tottenham', position: 'LW' },
-    { name: 'Ollie Watkins', team: 'Aston Villa', position: 'ST' },
-    { name: 'Alexander Isak', team: 'Newcastle', position: 'ST' },
-    { name: 'Phil Foden', team: 'Manchester City', position: 'AM' },
+    { name: 'Bukayo Saka', team_id: plTeams['Arsenal'].id, position: 'RW' },
+    { name: 'Kai Havertz', team_id: plTeams['Arsenal'].id, position: 'CF' },
+    { name: 'Mohamed Salah', team_id: plTeams['Liverpool'].id, position: 'RW' },
+    { name: 'Erling Haaland', team_id: plTeams['Manchester City'].id, position: 'ST' },
+    { name: 'Cole Palmer', team_id: plTeams['Chelsea'].id, position: 'AM' },
+    { name: 'Bruno Fernandes', team_id: plTeams['Manchester United'].id, position: 'AM' },
+    { name: 'Son Heung-min', team_id: plTeams['Tottenham'].id, position: 'LW' },
+    { name: 'Ollie Watkins', team_id: plTeams['Aston Villa'].id, position: 'ST' },
+    { name: 'Alexander Isak', team_id: plTeams['Newcastle'].id, position: 'ST' },
+    { name: 'Phil Foden', team_id: plTeams['Manchester City'].id, position: 'AM' },
   ];
 
   const players = await db('players').insert(playerData).returning('*');
@@ -74,49 +97,41 @@ async function seed() {
   const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
   const matchData = [
-    // Premier League matches
     {
       competition_id: premierLeague.id,
-      home_team: 'Arsenal',
-      away_team: 'Chelsea',
-      status: 'scheduled',
-      kickoff_at: tomorrow.toISOString(),
+      home_team: 'Arsenal', away_team: 'Chelsea',
+      home_team_id: plTeams['Arsenal'].id, away_team_id: plTeams['Chelsea'].id,
+      status: 'scheduled', kickoff_at: tomorrow.toISOString(), published: true,
     },
     {
       competition_id: premierLeague.id,
-      home_team: 'Liverpool',
-      away_team: 'Manchester City',
-      status: 'scheduled',
-      kickoff_at: dayAfter.toISOString(),
+      home_team: 'Liverpool', away_team: 'Manchester City',
+      home_team_id: plTeams['Liverpool'].id, away_team_id: plTeams['Manchester City'].id,
+      status: 'scheduled', kickoff_at: dayAfter.toISOString(), published: true,
     },
     {
       competition_id: premierLeague.id,
-      home_team: 'Tottenham',
-      away_team: 'Manchester United',
-      status: 'scheduled',
-      kickoff_at: nextWeek.toISOString(),
-    },
-    // Champions League matches
-    {
-      competition_id: championsLeague.id,
-      home_team: 'Arsenal',
-      away_team: 'Barcelona',
-      status: 'scheduled',
-      kickoff_at: tomorrow.toISOString(),
+      home_team: 'Tottenham', away_team: 'Manchester United',
+      home_team_id: plTeams['Tottenham'].id, away_team_id: plTeams['Manchester United'].id,
+      status: 'scheduled', kickoff_at: nextWeek.toISOString(), published: true,
     },
     {
       competition_id: championsLeague.id,
-      home_team: 'Liverpool',
-      away_team: 'Real Madrid',
-      status: 'scheduled',
-      kickoff_at: dayAfter.toISOString(),
+      home_team: 'Arsenal', away_team: 'Barcelona',
+      home_team_id: clTeams['Arsenal'].id, away_team_id: clTeams['Barcelona'].id,
+      status: 'scheduled', kickoff_at: tomorrow.toISOString(), published: true,
     },
     {
       competition_id: championsLeague.id,
-      home_team: 'Manchester City',
-      away_team: 'Bayern Munich',
-      status: 'scheduled',
-      kickoff_at: nextWeek.toISOString(),
+      home_team: 'Liverpool', away_team: 'Real Madrid',
+      home_team_id: clTeams['Liverpool'].id, away_team_id: clTeams['Real Madrid'].id,
+      status: 'scheduled', kickoff_at: dayAfter.toISOString(), published: true,
+    },
+    {
+      competition_id: championsLeague.id,
+      home_team: 'Manchester City', away_team: 'Bayern Munich',
+      home_team_id: clTeams['Manchester City'].id, away_team_id: clTeams['Bayern Munich'].id,
+      status: 'scheduled', kickoff_at: nextWeek.toISOString(), published: true,
     },
   ];
 
@@ -125,7 +140,6 @@ async function seed() {
 
   // ─── Markets + Options with odds for each match ───
   for (const match of matches) {
-    // match_outcome market
     const [market] = await db('markets')
       .insert({
         match_id: match.id,
@@ -136,47 +150,75 @@ async function seed() {
       .returning('*');
 
     await db('market_options').insert([
-      {
-        market_id: market.id,
-        label: `${match.home_team} win`,
-        outcome_key: 'home',
-        odds: 2.1,
-      },
-      {
-        market_id: market.id,
-        label: 'Draw',
-        outcome_key: 'draw',
-        odds: 3.4,
-      },
-      {
-        market_id: market.id,
-        label: `${match.away_team} win`,
-        outcome_key: 'away',
-        odds: 3.0,
-      },
+      { market_id: market.id, label: `${match.home_team} win`, outcome_key: 'home', odds: 2.1 },
+      { market_id: market.id, label: 'Draw', outcome_key: 'draw', odds: 3.4 },
+      { market_id: market.id, label: `${match.away_team} win`, outcome_key: 'away', odds: 3.0 },
     ]);
   }
+  console.log('[Seed] Match markets created');
 
-  console.log('[Seed] Markets and options created');
-
-  // ─── Outright market for Premier League ───
-  const [outrightMarket] = await db('markets')
+  // ─── Competition outright markets ───
+  // PL Winner
+  const [plWinner] = await db('markets')
     .insert({
       competition_id: premierLeague.id,
       type: 'outright',
+      subtype: 'winner',
+      question: 'Who will win Premier League 2024/25?',
       status: 'open',
       closes_at: '2025-05-25T00:00:00Z',
     })
     .returning('*');
 
   await db('market_options').insert([
-    { market_id: outrightMarket.id, label: 'Arsenal', outcome_key: 'arsenal', odds: 2.5 },
-    { market_id: outrightMarket.id, label: 'Liverpool', outcome_key: 'liverpool', odds: 3.0 },
-    { market_id: outrightMarket.id, label: 'Manchester City', outcome_key: 'man_city', odds: 2.8 },
-    { market_id: outrightMarket.id, label: 'Chelsea', outcome_key: 'chelsea', odds: 8.0 },
+    { market_id: plWinner.id, label: 'Arsenal', outcome_key: plTeams['Arsenal'].id, odds: 2.5 },
+    { market_id: plWinner.id, label: 'Liverpool', outcome_key: plTeams['Liverpool'].id, odds: 3.0 },
+    { market_id: plWinner.id, label: 'Manchester City', outcome_key: plTeams['Manchester City'].id, odds: 2.8 },
+    { market_id: plWinner.id, label: 'Chelsea', outcome_key: plTeams['Chelsea'].id, odds: 8.0 },
   ]);
 
-  console.log('[Seed] Outright market created');
+  // PL Top Goalscorer
+  const [plTopScorer] = await db('markets')
+    .insert({
+      competition_id: premierLeague.id,
+      type: 'outright',
+      subtype: 'top_goalscorer',
+      question: 'Top goalscorer of Premier League 2024/25?',
+      status: 'open',
+      closes_at: '2025-05-25T00:00:00Z',
+    })
+    .returning('*');
+
+  const scorerOptions = players.slice(0, 6).map((p) => ({
+    market_id: plTopScorer.id,
+    label: p.name,
+    outcome_key: p.id,
+    player_id: p.id,
+    odds: null,
+  }));
+  await db('market_options').insert(scorerOptions);
+
+  console.log('[Seed] Competition outright markets created');
+
+  // ─── Sample match event (in-match question) ───
+  const firstMatch = matches[0];
+  const [eventMarket] = await db('markets')
+    .insert({
+      match_id: firstMatch.id,
+      type: 'in_match_event',
+      question: 'Who scores first?',
+      status: 'open',
+      closes_at: firstMatch.kickoff_at,
+    })
+    .returning('*');
+
+  await db('market_options').insert([
+    { market_id: eventMarket.id, label: `${firstMatch.home_team} player`, outcome_key: 'home_scores_first', odds: 1.8 },
+    { market_id: eventMarket.id, label: `${firstMatch.away_team} player`, outcome_key: 'away_scores_first', odds: 2.2 },
+    { market_id: eventMarket.id, label: 'No goals', outcome_key: 'no_goals', odds: 8.0 },
+  ]);
+
+  console.log('[Seed] Match event market created');
 
   // ─── Feature flags ───
   await db('feature_flags').insert([
