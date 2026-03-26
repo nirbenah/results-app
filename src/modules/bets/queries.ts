@@ -312,8 +312,8 @@ export async function findBetsByUserAndGroup(
       'markets.status as market_status',
       'matches.home_team',
       'matches.away_team',
-      'matches.home_score',
-      'matches.away_score',
+      getDb().raw("(matches.result->>'home_score')::int as home_score"),
+      getDb().raw("(matches.result->>'away_score')::int as away_score"),
       'matches.status as match_status'
     )
     .orderBy('bets.placed_at', 'desc');

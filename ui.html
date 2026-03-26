@@ -1143,11 +1143,15 @@ async function toggleMarkets(matchId) {
     container.classList.remove('hidden');
 
     // Load existing bets and highlight selected options
-    var betsData = await api('GET', '/v1/bets?group_id=' + state.activeGroupId);
     var betsByOption = {};
-    betsData.bets.forEach(function(b) {
-      if (b.status === 'pending' && b.market_option && b.market_option.id) betsByOption[b.market_option.id] = b;
-    });
+    try {
+      var betsData = await api('GET', '/v1/bets?group_id=' + state.activeGroupId);
+      betsData.bets.forEach(function(b) {
+        if (b.status === 'pending' && b.market_option && b.market_option.id) betsByOption[b.market_option.id] = b;
+      });
+    } catch (betsErr) {
+      console.error('Could not load existing bets:', betsErr);
+    }
 
     // Highlight already-selected options
     container.querySelectorAll('[data-action="place-bet"]').forEach(function(btn) {
