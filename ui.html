@@ -779,7 +779,7 @@ async function switchImpersonation(targetUserId) {
 
   // If on a screen that shows user-specific data, refresh it
   var screen = state.currentScreen;
-  if (screen === 'bets') loadMyBets();
+  if (screen === 'bets') loadBets();
   if (screen === 'wallet') loadWallet();
   if (screen === 'leaderboard') loadLeaderboard();
   if (screen === 'profile') loadProfile();
