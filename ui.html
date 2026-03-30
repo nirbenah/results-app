@@ -582,7 +582,12 @@ async function api(method, path, body) {
   if (body) opts.body = JSON.stringify(body);
 
   var res = await fetch(API + path, opts);
-  var data = await res.json();
+
+  // 204 No Content — nothing to parse
+  if (res.status === 204) return {};
+
+  var data = {};
+  try { data = await res.json(); } catch (e) { /* empty body */ }
 
   if (!res.ok) {
     if (res.status === 401) {
@@ -1837,8 +1842,11 @@ async function loadAdminCompetitions() {
       container.querySelectorAll('[data-action="del-comp"]').forEach(function(btn) {
         btn.addEventListener('click', async function() {
           if (confirm('Delete this competition and all its teams/matches?')) {
-            await api('DELETE', '/v1/admin/competitions/' + this.dataset.id);
-            loadAdminCompetitions();
+            try {
+              await api('DELETE', '/v1/admin/competitions/' + this.dataset.id);
+              loadAdminCompetitions();
+              loadCompetitions();
+            } catch (e) { alert('Delete error: ' + e.message); }
           }
         });
       });

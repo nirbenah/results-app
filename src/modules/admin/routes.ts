@@ -166,17 +166,25 @@ router.put('/teams/:id', async (req: Request, res: Response, next: NextFunction)
 router.delete('/teams/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const db = getDb();
-    const team = await db('teams').where('id', req.params.id).first();
+    const teamId = req.params.id;
+    const team = await db('teams').where('id', teamId).first();
     if (!team) throw new NotFoundError('Team');
 
     // Clear player_id references in market_options, then delete players
-    const playerIds = (await db('players').where('team_id', req.params.id).select('id')).map((p: { id: string }) => p.id);
+    const playerIds = (await db('players').where('team_id', teamId).select('id')).map((p: { id: string }) => p.id);
     if (playerIds.length) {
       await db('market_options').whereIn('player_id', playerIds).update({ player_id: null });
       await db('players').whereIn('id', playerIds).del();
     }
 
-    await db('teams').where('id', req.params.id).del();
+    // Clear team references in matches
+    await db('matches').where('home_team_id', teamId).update({ home_team_id: null });
+    await db('matches').where('away_team_id', teamId).update({ away_team_id: null });
+
+    // Clear team references in market_options (outcome_key may be team id)
+    await db('market_options').where('outcome_key', teamId).update({ outcome_key: team.name });
+
+    await db('teams').where('id', teamId).del();
     res.status(204).send();
   } catch (err) { next(err); }
 });
