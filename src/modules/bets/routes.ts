@@ -157,6 +157,8 @@ router.get('/bets', async (req: Request, res: Response, next: NextFunction) => {
         market: {
           id: b.market_id,
           type: b.market_type,
+          subtype: b.market_subtype || null,
+          question: b.market_question || null,
           status: b.market_status,
           winning_option: winningOption,
           match: b.home_team
@@ -347,6 +349,8 @@ function formatMarket(m: queries.MarketWithOptions) {
   return {
     id: m.id,
     type: m.type,
+    subtype: m.subtype || null,
+    question: m.question || null,
     status: m.status,
     closes_at: m.closes_at,
     options: m.options.map((o) => ({

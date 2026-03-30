@@ -71,8 +71,37 @@ router.put('/competitions/:id', async (req: Request, res: Response, next: NextFu
 
 router.delete('/competitions/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const deleted = await getDb()('competitions').where('id', req.params.id).del();
-    if (!deleted) throw new NotFoundError('Competition');
+    const db = getDb();
+    const compId = req.params.id;
+    const comp = await db('competitions').where('id', compId).first();
+    if (!comp) throw new NotFoundError('Competition');
+
+    // Cascade: markets → bets, market_options; matches; teams → players; group_competitions
+    const matches = await db('matches').where('competition_id', compId).select('id');
+    const matchIds = matches.map((m: { id: string }) => m.id);
+
+    const markets = await db('markets')
+      .where('competition_id', compId)
+      .orWhereIn('match_id', matchIds.length ? matchIds : ['__none__'])
+      .select('id');
+    const marketIds = markets.map((m: { id: string }) => m.id);
+
+    if (marketIds.length) {
+      const optionIds = (await db('market_options').whereIn('market_id', marketIds).select('id')).map((o: { id: string }) => o.id);
+      if (optionIds.length) await db('bets').whereIn('market_option_id', optionIds).del();
+      await db('market_options').whereIn('market_id', marketIds).del();
+      await db('markets').whereIn('id', marketIds).del();
+    }
+
+    const teams = await db('teams').where('competition_id', compId).select('id');
+    const teamIds = teams.map((t: { id: string }) => t.id);
+    if (teamIds.length) await db('players').whereIn('team_id', teamIds).del();
+    await db('teams').where('competition_id', compId).del();
+
+    if (matchIds.length) await db('matches').whereIn('id', matchIds).del();
+    await db('group_competitions').where('competition_id', compId).del();
+    await db('competitions').where('id', compId).del();
+
     res.status(204).send();
   } catch (err) { next(err); }
 });
@@ -136,8 +165,18 @@ router.put('/teams/:id', async (req: Request, res: Response, next: NextFunction)
 
 router.delete('/teams/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const deleted = await getDb()('teams').where('id', req.params.id).del();
-    if (!deleted) throw new NotFoundError('Team');
+    const db = getDb();
+    const team = await db('teams').where('id', req.params.id).first();
+    if (!team) throw new NotFoundError('Team');
+
+    // Clear player_id references in market_options, then delete players
+    const playerIds = (await db('players').where('team_id', req.params.id).select('id')).map((p: { id: string }) => p.id);
+    if (playerIds.length) {
+      await db('market_options').whereIn('player_id', playerIds).update({ player_id: null });
+      await db('players').whereIn('id', playerIds).del();
+    }
+
+    await db('teams').where('id', req.params.id).del();
     res.status(204).send();
   } catch (err) { next(err); }
 });
@@ -202,8 +241,13 @@ router.put('/players/:id', async (req: Request, res: Response, next: NextFunctio
 
 router.delete('/players/:id', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const deleted = await getDb()('players').where('id', req.params.id).del();
-    if (!deleted) throw new NotFoundError('Player');
+    const db = getDb();
+    const player = await db('players').where('id', req.params.id).first();
+    if (!player) throw new NotFoundError('Player');
+
+    // Clear player_id references in market_options
+    await db('market_options').where('player_id', req.params.id).update({ player_id: null });
+    await db('players').where('id', req.params.id).del();
     res.status(204).send();
   } catch (err) { next(err); }
 });
@@ -649,12 +693,25 @@ router.delete('/users/:id', async (req: Request, res: Response, next: NextFuncti
     const user = await getDb()('users').where('id', userId).first();
     if (!user) throw new NotFoundError('User');
 
-    // Cascade: remove bets, wallet, leaderboard entries, group memberships
+    // Cascade: remove bets, wallet, leaderboard entries, group memberships, owned groups
     const db = getDb();
     await db('bets').where('user_id', userId).del();
     await db('wallet_transactions').where('user_id', userId).del();
     await db('leaderboard_entries').where('user_id', userId).del();
     await db('group_members').where('user_id', userId).del();
+    // Transfer commissioner role or delete empty groups
+    const ownedGroups = await db('groups').where('commissioner_id', userId).select('id');
+    for (const g of ownedGroups) {
+      const otherMember = await db('group_members').where('group_id', g.id).first();
+      if (otherMember) {
+        await db('groups').where('id', g.id).update({ commissioner_id: otherMember.user_id });
+        await db('group_members').where({ group_id: g.id, user_id: otherMember.user_id }).update({ role: 'commissioner' });
+      } else {
+        // Empty group — clean up
+        await db('group_competitions').where('group_id', g.id).del();
+        await db('groups').where('id', g.id).del();
+      }
+    }
     await db('users').where('id', userId).del();
 
     res.status(204).send();

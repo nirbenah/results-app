@@ -18,12 +18,13 @@ router.get('/', async (req: Request, res: Response, next: NextFunction) => {
 router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const userId = req.userId!;
-    const { name, scoring_format, allowed_bet_types, competition_ids } = req.body;
+    const { name, scoring_format, allowed_bet_types, competition_ids, competition_bets_deadline } = req.body;
     const result = await service.createGroup(userId, {
       name,
       scoring_format,
       allowed_bet_types,
       competition_ids,
+      competition_bets_deadline,
     }, req.correlationId);
     res.status(201).json(result);
   } catch (err) {
@@ -84,6 +85,22 @@ router.delete('/:groupId/members/:userId', async (req: Request, res: Response, n
       req.correlationId
     );
     res.status(204).send();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /v1/groups/:groupId — Update group settings (commissioner only)
+router.put('/:groupId', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const userId = req.userId!;
+    const result = await service.updateGroupSettings(
+      req.params.groupId as string,
+      userId,
+      req.body,
+      req.correlationId
+    );
+    res.status(200).json(result);
   } catch (err) {
     next(err);
   }

@@ -85,6 +85,14 @@ export async function placeBet(params: PlaceBetParams): Promise<PlaceBetResult> 
     throw new BadRequestError('MARKET_CLOSED', 'Market has passed its closing time');
   }
 
+  // For outright (competition-level) markets, also check group's competition_bets_deadline
+  if (market.type === 'outright' && market.competition_id) {
+    const fullGroup = await queries.findFullGroupById(groupId);
+    if (fullGroup?.competition_bets_deadline && new Date(fullGroup.competition_bets_deadline) <= new Date()) {
+      throw new BadRequestError('COMP_BETS_CLOSED', 'The deadline for competition bets in this group has passed');
+    }
+  }
+
   // Validate the market's competition is linked to this group
   const inGroup = await queries.isMarketInGroup(marketOptionId, groupId);
   if (!inGroup) {
@@ -93,8 +101,19 @@ export async function placeBet(params: PlaceBetParams): Promise<PlaceBetResult> 
 
   // Validate allowed bet types for this group
   if (group.allowed_bet_types && group.allowed_bet_types.length > 0) {
-    if (!group.allowed_bet_types.includes(market.type)) {
-      throw new BadRequestError('BET_TYPE_NOT_ALLOWED', `This group does not allow ${market.type.replace(/_/g, ' ')} bets`);
+    // For outright markets, check the subtype (winner → competition_winner, etc.)
+    let betTypeKey = market.type;
+    if (market.type === 'outright' && market.subtype) {
+      const subtypeMap: Record<string, string> = {
+        winner: 'competition_winner',
+        top_goalscorer: 'top_goalscorer',
+        top_assists: 'top_assists',
+        man_of_season: 'man_of_season',
+      };
+      betTypeKey = subtypeMap[market.subtype] || market.type;
+    }
+    if (!group.allowed_bet_types.includes(betTypeKey)) {
+      throw new BadRequestError('BET_TYPE_NOT_ALLOWED', `This group does not allow ${betTypeKey.replace(/_/g, ' ')} bets`);
     }
   }
 

@@ -297,6 +297,11 @@
           </div>
         </div>
         <div class="form-group">
+          <label>Competition Bets Deadline</label>
+          <input type="datetime-local" id="comp-bets-deadline" style="font-size:13px;" />
+          <div style="font-size:11px;color:#6b7280;margin-top:2px;">Deadline for competition-level bets (top goalscorer, winner, etc.)</div>
+        </div>
+        <div class="form-group">
           <label>Select Competitions</label>
           <div class="comp-chips" id="comp-chips-create"></div>
         </div>
@@ -317,6 +322,7 @@
         <div class="card">
           <div class="card-title" id="group-detail-name"></div>
           <div style="font-size:12px;color:#6b7280;" id="group-detail-info"></div>
+          <div id="group-deadline-area" class="hidden" style="margin-top:8px;"></div>
           <div class="invite-box" id="group-invite-code"></div>
           <div style="font-size:11px;color:#6b7280;margin-top:4px;">Share this code so others can join</div>
         </div>
@@ -407,6 +413,31 @@
         </div>
         <!-- Match detail panel (markets + events + odds) -->
         <div id="admin-match-detail" class="hidden" style="margin-top:12px;"></div>
+      </div>
+
+      <!-- Admin: Competition Markets (outright bets) -->
+      <div class="card">
+        <div class="card-title">Competition Markets</div>
+        <div class="form-group">
+          <label>Competition</label>
+          <select id="admin-comp-market-comp"></select>
+        </div>
+        <div id="admin-comp-markets-list"></div>
+        <div style="margin-top:10px;background:#1a1b23;border-radius:8px;padding:10px;">
+          <div style="font-size:12px;font-weight:700;color:#6b7280;margin-bottom:6px;">CREATE COMPETITION MARKET</div>
+          <div class="form-group">
+            <select id="admin-comp-market-subtype">
+              <option value="winner">Competition Winner (teams)</option>
+              <option value="top_goalscorer">Top Goalscorer (players)</option>
+              <option value="top_assists">Top Assists (players)</option>
+              <option value="man_of_season">Man of the Season (players)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <input id="admin-comp-market-question" placeholder="Custom question (optional)" style="font-size:12px;padding:6px 8px;" />
+          </div>
+          <button class="btn btn-success btn-sm" id="btn-admin-create-comp-market">Create Market</button>
+        </div>
       </div>
 
       <!-- Admin: Groups -->
@@ -864,6 +895,54 @@ async function loadGroupDetails() {
       data.member_count + ' members | ' + (data.scoring_format || 'betting') + ' format';
     document.getElementById('group-invite-code').textContent = state.activeGroupId;
 
+    // Competition bets deadline
+    var deadlineArea = document.getElementById('group-deadline-area');
+    var hasCompBets = (data.allowed_bet_types || []).some(function(t) {
+      return ['competition_winner','top_goalscorer','top_assists','man_of_season'].indexOf(t) !== -1;
+    });
+    if (hasCompBets) {
+      deadlineArea.classList.remove('hidden');
+      if (isCommissioner) {
+        var dlVal = data.competition_bets_deadline ? new Date(data.competition_bets_deadline).toISOString().slice(0, 16) : '';
+        deadlineArea.innerHTML =
+          '<div style="font-size:12px;font-weight:600;color:#a78bfa;margin-bottom:4px;">Competition Bets Deadline</div>'
+          + '<div style="display:flex;gap:6px;align-items:center;">'
+          + '<input type="datetime-local" id="edit-comp-deadline" value="' + dlVal + '" style="flex:1;font-size:12px;padding:4px 8px;" />'
+          + '<button class="btn btn-success btn-sm" id="btn-save-deadline">Save</button>'
+          + '</div>';
+        document.getElementById('btn-save-deadline').addEventListener('click', async function() {
+          var val = document.getElementById('edit-comp-deadline').value || null;
+          try {
+            await api('PUT', '/v1/groups/' + state.activeGroupId, { competition_bets_deadline: val });
+            log('Deadline updated!', 'success');
+          } catch (e) { alert('Error: ' + e.message); }
+        });
+      } else if (data.competition_bets_deadline) {
+        var dl = new Date(data.competition_bets_deadline);
+        var now = new Date();
+        var remaining = dl - now;
+        if (remaining > 0) {
+          var days = Math.floor(remaining / 86400000);
+          var hours = Math.floor((remaining % 86400000) / 3600000);
+          var mins = Math.floor((remaining % 3600000) / 60000);
+          var countdownText = (days > 0 ? days + 'd ' : '') + hours + 'h ' + mins + 'm left';
+          deadlineArea.innerHTML =
+            '<div style="background:#a78bfa20;border:1px solid #a78bfa40;border-radius:8px;padding:8px 12px;text-align:center;">'
+            + '<div style="font-size:11px;color:#a78bfa;">Competition Bets Close In</div>'
+            + '<div style="font-size:18px;font-weight:700;color:#a78bfa;" id="comp-deadline-countdown">' + countdownText + '</div>'
+            + '</div>';
+        } else {
+          deadlineArea.innerHTML =
+            '<div style="background:#ef444420;border:1px solid #ef444440;border-radius:8px;padding:6px 12px;text-align:center;">'
+            + '<div style="font-size:12px;color:#ef4444;font-weight:600;">Competition bets are closed</div></div>';
+        }
+      } else {
+        deadlineArea.innerHTML = '';
+      }
+    } else {
+      deadlineArea.classList.add('hidden');
+    }
+
     // Render competitions
     renderGroupCompetitions(data.competitions || [], isCommissioner);
 
@@ -1013,7 +1092,109 @@ async function loadMatches() {
     } catch (e) { return; }
   }
 
+  // Get group details for deadline & allowed bet types
+  var groupData = null;
+  try {
+    groupData = await api('GET', '/v1/groups/' + state.activeGroupId);
+  } catch (e) { /* ignore */ }
+
+  var allowedBetTypes = (groupData && groupData.allowed_bet_types) || [];
+  var hasCompBets = allowedBetTypes.some(function(t) {
+    return ['competition_winner','top_goalscorer','top_assists','man_of_season'].indexOf(t) !== -1;
+  });
+  var compDeadline = groupData && groupData.competition_bets_deadline ? new Date(groupData.competition_bets_deadline) : null;
+  var compBetsOpen = !compDeadline || compDeadline > new Date();
+  var activeGroup = getActiveGroup();
+  var isPointsFormat = activeGroup && activeGroup.scoring_format === 'points';
+
   var html = '';
+
+  // ─── Competition-level markets (top goalscorer, winner, etc.) ───
+  if (hasCompBets) {
+    for (var ci = 0; ci < state.competitions.length; ci++) {
+      var compForMarkets = state.competitions[ci];
+      try {
+        var cmData = await api('GET', '/v1/competitions/' + compForMarkets.id + '/markets');
+        if (cmData.markets && cmData.markets.length > 0) {
+          // Filter to only show market types that are allowed
+          var filteredMarkets = cmData.markets.filter(function(m) {
+            if (m.subtype === 'winner' && allowedBetTypes.indexOf('competition_winner') !== -1) return true;
+            if (m.subtype === 'top_goalscorer' && allowedBetTypes.indexOf('top_goalscorer') !== -1) return true;
+            if (m.subtype === 'top_assists' && allowedBetTypes.indexOf('top_assists') !== -1) return true;
+            if (m.subtype === 'man_of_season' && allowedBetTypes.indexOf('man_of_season') !== -1) return true;
+            return false;
+          });
+          if (filteredMarkets.length > 0) {
+            html += '<div class="section-title" style="color:#a78bfa;">' + compForMarkets.name + ' — Special Bets</div>';
+
+            // Countdown
+            if (compDeadline) {
+              var now = new Date();
+              var remaining = compDeadline - now;
+              if (remaining > 0) {
+                var days = Math.floor(remaining / 86400000);
+                var hours = Math.floor((remaining % 86400000) / 3600000);
+                var mins = Math.floor((remaining % 3600000) / 60000);
+                html += '<div style="background:#a78bfa20;border:1px solid #a78bfa40;border-radius:8px;padding:6px 12px;margin-bottom:8px;text-align:center;">'
+                  + '<span style="font-size:11px;color:#a78bfa;">Closes in </span>'
+                  + '<span style="font-size:14px;font-weight:700;color:#a78bfa;">'
+                  + (days > 0 ? days + 'd ' : '') + hours + 'h ' + mins + 'm'
+                  + '</span></div>';
+              } else {
+                html += '<div style="background:#ef444420;border:1px solid #ef444440;border-radius:8px;padding:6px 12px;margin-bottom:8px;text-align:center;">'
+                  + '<span style="font-size:12px;color:#ef4444;font-weight:600;">Betting closed</span></div>';
+              }
+            }
+
+            for (var cmi = 0; cmi < filteredMarkets.length; cmi++) {
+              var cm = filteredMarkets[cmi];
+              var qText = cm.question || (cm.subtype || cm.type).replace(/_/g, ' ');
+              var statusBadgeCm = cm.status === 'open'
+                ? '<span class="badge badge-open">open</span>'
+                : '<span class="badge badge-lost">' + cm.status + '</span>';
+
+              html += '<div class="card" style="margin-bottom:8px;">'
+                + '<div class="card-title">' + qText + ' ' + statusBadgeCm + '</div>';
+
+              if (cm.status === 'open' && compBetsOpen) {
+                html += '<div class="options" id="comp-market-' + cm.id + '">';
+                for (var cmj = 0; cmj < cm.options.length; cmj++) {
+                  var co = cm.options[cmj];
+                  var oddsDisplay = isPointsFormat ? '1pt' : (co.odds ? Number(co.odds).toFixed(1) : '-');
+                  html += '<div class="option-btn" data-action="place-comp-bet" data-option="' + co.id + '" data-market="' + cm.id + '" data-label="' + co.label + '">'
+                    + '<div class="option-label">' + co.label + '</div>'
+                    + '<div class="option-odds">' + oddsDisplay + '</div>'
+                    + '</div>';
+                }
+                html += '</div>';
+              } else if (cm.status === 'settled') {
+                // Show winner
+                html += '<div style="margin-top:6px;">';
+                for (var cmk = 0; cmk < cm.options.length; cmk++) {
+                  var so = cm.options[cmk];
+                  var winStyle = so.is_winner ? 'color:#4ade80;font-weight:700;' : 'color:#6b7280;';
+                  html += '<div style="font-size:13px;padding:2px 0;' + winStyle + '">'
+                    + so.label + (so.is_winner ? ' ✓ Winner' : '') + '</div>';
+                }
+                html += '</div>';
+              } else {
+                // Closed but not settled — show options without betting
+                html += '<div style="margin-top:6px;">';
+                for (var cml = 0; cml < cm.options.length; cml++) {
+                  html += '<div style="font-size:13px;padding:2px 0;color:#6b7280;">' + cm.options[cml].label + '</div>';
+                }
+                html += '</div>';
+              }
+
+              html += '</div>';
+            }
+          }
+        }
+      } catch (e) { /* no competition markets */ }
+    }
+  }
+
+  // ─── Match-level betting ───
   for (var c = 0; c < state.competitions.length; c++) {
     var comp = state.competitions[c];
     try {
@@ -1055,12 +1236,71 @@ async function loadMatches() {
   }
   container.innerHTML = html || '<div class="empty">No matches available</div>';
 
+  // Bind match bet buttons
   container.querySelectorAll('[data-action="bet"]').forEach(function(btn) {
     btn.addEventListener('click', function() { toggleMarkets(this.dataset.match); });
   });
   container.querySelectorAll('[data-action="settle"]').forEach(function(btn) {
     btn.addEventListener('click', function() { toggleSettle(this.dataset.match, this.dataset.home, this.dataset.away); });
   });
+
+  // Bind competition bet buttons + load existing bets to highlight selections
+  var compBetBtns = container.querySelectorAll('[data-action="place-comp-bet"]');
+  if (compBetBtns.length > 0) {
+    // Load existing bets to highlight selections
+    var betsByOption = {};
+    try {
+      var betsData = await api('GET', '/v1/bets?group_id=' + state.activeGroupId);
+      betsData.bets.forEach(function(b) {
+        if (b.status === 'pending' && b.market_option && b.market_option.id) betsByOption[b.market_option.id] = b;
+      });
+    } catch (e) { /* ignore */ }
+
+    compBetBtns.forEach(function(btn) {
+      var optId = btn.dataset.option;
+      if (betsByOption[optId]) btn.classList.add('selected');
+
+      btn.addEventListener('click', async function() {
+        var optionId = this.dataset.option;
+        var marketId = this.dataset.market;
+        var label = this.dataset.label;
+
+        // Mutual exclusion within same market
+        var siblings = container.querySelectorAll('[data-action="place-comp-bet"][data-market="' + marketId + '"]');
+
+        // If already selected, cancel the bet
+        if (this.classList.contains('selected')) {
+          // Find the bet to cancel
+          if (betsByOption[optionId]) {
+            try {
+              await api('DELETE', '/v1/bets/' + betsByOption[optionId].id);
+              delete betsByOption[optionId];
+              this.classList.remove('selected');
+              log('Bet cancelled', 'success');
+            } catch (e) { alert('Cancel error: ' + e.message); }
+          }
+          return;
+        }
+
+        try {
+          var result = await api('POST', '/v1/bets', {
+            group_id: state.activeGroupId,
+            market_option_id: optionId,
+          });
+          // Remove selection from siblings
+          siblings.forEach(function(s) {
+            if (betsByOption[s.dataset.option]) {
+              delete betsByOption[s.dataset.option];
+            }
+            s.classList.remove('selected');
+          });
+          betsByOption[optionId] = result;
+          this.classList.add('selected');
+          log('Bet placed: ' + label, 'success');
+        } catch (e) { alert('Bet error: ' + (e.message || e)); }
+      });
+    });
+  }
 }
 
 async function toggleMarkets(matchId) {
@@ -1353,7 +1593,16 @@ async function loadBets() {
       // Skip void bets
       if (bet.status === 'void') continue;
 
-      var matchInfo = bet.market && bet.market.match ? bet.market.match.home_team + ' vs ' + bet.market.match.away_team : 'Outright';
+      var matchInfo = '';
+      if (bet.market && bet.market.match) {
+        matchInfo = bet.market.match.home_team + ' vs ' + bet.market.match.away_team;
+      } else if (bet.market && bet.market.question) {
+        matchInfo = bet.market.question;
+      } else if (bet.market && bet.market.subtype) {
+        matchInfo = bet.market.subtype.replace(/_/g, ' ');
+      } else {
+        matchInfo = 'Competition Bet';
+      }
       var betType = bet.market && bet.market.type ? bet.market.type.replace(/_/g, ' ') : '';
       var statusCls = bet.status === 'won' ? 'badge-won' : bet.status === 'lost' ? 'badge-lost' : 'badge-pending';
 
@@ -1515,6 +1764,8 @@ async function createGroup() {
   if (document.getElementById('bet-type-top-assists').checked) allowedBetTypes.push('top_assists');
   if (document.getElementById('bet-type-man-of-season').checked) allowedBetTypes.push('man_of_season');
 
+  var compBetsDeadline = document.getElementById('comp-bets-deadline').value || null;
+
   var selectedChips = document.querySelectorAll('#comp-chips-create .comp-chip.selected');
   var competitionIds = [];
   selectedChips.forEach(function(chip) {
@@ -1527,6 +1778,7 @@ async function createGroup() {
       scoring_format: scoringFormat,
       allowed_bet_types: allowedBetTypes,
       competition_ids: competitionIds,
+      competition_bets_deadline: compBetsDeadline,
     });
     log('Group "' + name + '" created!', 'success');
 
@@ -1614,12 +1866,18 @@ async function loadAdminCompetitions() {
     teamsComp.innerHTML = compOptions;
     if (prevTeams && teamsComp.querySelector('option[value="' + prevTeams + '"]')) teamsComp.value = prevTeams;
 
+    var compMarketComp = document.getElementById('admin-comp-market-comp');
+    var prevCompMarket = compMarketComp.value;
+    compMarketComp.innerHTML = compOptions;
+    if (prevCompMarket && compMarketComp.querySelector('option[value="' + prevCompMarket + '"]')) compMarketComp.value = prevCompMarket;
+
     // Load data for selected comp
     if (matchComp.value) {
       loadAdminMatches(matchComp.value);
       loadMatchTeamDropdowns(matchComp.value);
     }
     if (teamsComp.value) loadAdminTeams(teamsComp.value);
+    if (compMarketComp.value) loadAdminCompMarkets(compMarketComp.value);
   } catch (e) {
     console.error('Admin competitions error:', e);
   }
@@ -1874,6 +2132,99 @@ async function adminAddMatch() {
     document.getElementById('admin-match-home-select').value = '';
     document.getElementById('admin-match-away-select').value = '';
     loadAdminMatches(compId);
+  } catch (e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+// ═══ Admin: Competition Markets (outright bets) ═══
+async function loadAdminCompMarkets(compId) {
+  if (!compId) return;
+  var container = document.getElementById('admin-comp-markets-list');
+  try {
+    var data = await api('GET', '/v1/competitions/' + compId + '/markets');
+    var markets = data.markets || [];
+    if (!markets.length) {
+      container.innerHTML = '<div class="empty">No competition markets yet. Create one below.</div>';
+      return;
+    }
+    var html = '';
+    for (var i = 0; i < markets.length; i++) {
+      var m = markets[i];
+      var title = m.question || m.subtype || m.type;
+      html += '<div style="background:#252636;border-radius:8px;padding:10px;margin-bottom:8px;">'
+        + '<div style="font-size:13px;font-weight:600;">' + title
+        + ' <span class="badge badge-' + (m.status === 'open' ? 'open' : m.status === 'settled' ? 'lost' : 'scheduled') + '">' + m.status + '</span></div>';
+
+      if (m.options && m.options.length > 0) {
+        html += '<div style="margin-top:6px;">';
+        for (var j = 0; j < m.options.length; j++) {
+          var o = m.options[j];
+          var winMark = o.is_winner ? ' style="color:#4ade80;font-weight:700;"' : '';
+          html += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">'
+            + '<span' + winMark + ' style="flex:1;font-size:13px;">' + o.label + (o.is_winner ? ' &#10003;' : '') + '</span>'
+            + '<label style="font-size:11px;color:#6b7280;">Odds:</label>'
+            + '<input type="number" step="0.1" min="1" value="' + (o.odds || '') + '" class="admin-odds-input" data-option-id="' + o.id + '" style="width:65px;padding:4px;font-size:13px;text-align:center;" />'
+            + '</div>';
+        }
+        html += '</div>';
+
+        // Settle buttons (pick the winner)
+        if (m.status === 'open') {
+          html += '<div style="margin-top:6px;font-size:11px;color:#6b7280;font-weight:600;">Pick winner:</div><div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:4px;">';
+          for (var sj = 0; sj < m.options.length; sj++) {
+            html += '<button class="btn btn-outline btn-sm" data-action="settle-comp-market" data-market-id="' + m.id + '" data-option-id="' + m.options[sj].id + '" style="font-size:11px;">' + m.options[sj].label + '</button>';
+          }
+          html += '</div>';
+        }
+      }
+      html += '</div>';
+    }
+    container.innerHTML = html;
+
+    // Bind odds editing
+    container.querySelectorAll('.admin-odds-input').forEach(function(inp) {
+      inp.addEventListener('change', async function() {
+        var newOdds = parseFloat(this.value);
+        if (isNaN(newOdds) || newOdds < 1) return;
+        try {
+          await api('PUT', '/v1/admin/market-options/' + this.dataset.optionId, { odds: newOdds });
+          this.style.borderColor = '#4ade80';
+          setTimeout(function() { inp.style.borderColor = ''; }, 1000);
+        } catch (e) { alert('Error updating odds: ' + e.message); }
+      });
+    });
+
+    // Bind settle buttons
+    container.querySelectorAll('[data-action="settle-comp-market"]').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        if (!confirm('Settle this market with "' + this.textContent + '" as the winner? This will resolve all bets.')) return;
+        try {
+          await api('POST', '/v1/admin/markets/' + this.dataset.marketId + '/settle', { winning_option_id: this.dataset.optionId });
+          alert('Market settled!');
+          loadAdminCompMarkets(document.getElementById('admin-comp-market-comp').value);
+        } catch (e) { alert('Settle error: ' + e.message); }
+      });
+    });
+  } catch (e) {
+    container.innerHTML = '<div class="empty">Error loading markets</div>';
+  }
+}
+
+async function adminCreateCompMarket() {
+  var compId = document.getElementById('admin-comp-market-comp').value;
+  if (!compId) return alert('Select a competition first');
+  var subtype = document.getElementById('admin-comp-market-subtype').value;
+  var question = document.getElementById('admin-comp-market-question').value.trim() || null;
+  try {
+    var result = await api('POST', '/v1/admin/competitions/' + compId + '/markets', {
+      subtype: subtype,
+      question: question,
+    });
+    var optCount = result.options ? result.options.length : 0;
+    log('Market created with ' + optCount + ' options!', 'success');
+    document.getElementById('admin-comp-market-question').value = '';
+    loadAdminCompMarkets(compId);
   } catch (e) {
     alert('Error: ' + e.message);
   }
@@ -2425,6 +2776,10 @@ document.getElementById('impersonate-select').addEventListener('change', functio
   switchImpersonation(this.value);
 });
 document.getElementById('btn-admin-create-user').addEventListener('click', adminCreateUser);
+document.getElementById('btn-admin-create-comp-market').addEventListener('click', adminCreateCompMarket);
+document.getElementById('admin-comp-market-comp').addEventListener('change', function() {
+  loadAdminCompMarkets(this.value);
+});
 
 // --- Init ---
 checkConnection();

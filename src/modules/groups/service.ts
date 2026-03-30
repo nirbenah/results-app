@@ -37,6 +37,7 @@ export async function createGroup(
     scoring_format?: string;
     allowed_bet_types?: string[];
     competition_ids?: string[];
+    competition_bets_deadline?: string | null;
   },
   correlationId?: string
 ) {
@@ -48,6 +49,7 @@ export async function createGroup(
         commissioner_id: userId,
         scoring_format: data.scoring_format || 'betting',
         allowed_bet_types: data.allowed_bet_types || ['match_outcome'],
+        competition_bets_deadline: data.competition_bets_deadline || null,
       },
       trx
     );
@@ -89,6 +91,7 @@ export async function createGroup(
       name: group.name,
       commissioner_id: group.commissioner_id,
       scoring_format: group.scoring_format,
+      competition_bets_deadline: group.competition_bets_deadline,
     };
   } catch (err) {
     await trx.rollback();
@@ -109,9 +112,49 @@ export async function getGroup(groupId: string) {
     commissioner_id: group.commissioner_id,
     scoring_format: group.scoring_format,
     allowed_bet_types: group.allowed_bet_types,
+    competition_bets_deadline: group.competition_bets_deadline,
     status: group.status,
     member_count: memberCount,
     competitions: competitions.map((c) => ({ id: c.id, name: c.name })),
+  };
+}
+
+// ─── Update Group Settings ───
+
+export async function updateGroupSettings(
+  groupId: string,
+  userId: string,
+  data: {
+    competition_bets_deadline?: string | null;
+    allowed_bet_types?: string[];
+  },
+  correlationId?: string
+) {
+  // Only commissioner can update
+  const group = await queries.findGroupById(groupId);
+  if (!group) throw new NotFoundError('Group');
+  if (group.commissioner_id !== userId) {
+    throw new ForbiddenError('Only the commissioner can update group settings');
+  }
+
+  const updates: Record<string, unknown> = {};
+  if (data.competition_bets_deadline !== undefined) {
+    updates.competition_bets_deadline = data.competition_bets_deadline || null;
+  }
+  if (data.allowed_bet_types !== undefined) {
+    updates.allowed_bet_types = data.allowed_bet_types;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    throw new BadRequestError('NO_UPDATES', 'No valid fields to update');
+  }
+
+  const updated = await queries.updateGroup(groupId, updates);
+  return {
+    id: updated.id,
+    name: updated.name,
+    competition_bets_deadline: updated.competition_bets_deadline,
+    allowed_bet_types: updated.allowed_bet_types,
   };
 }
 

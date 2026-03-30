@@ -10,6 +10,7 @@ export interface GroupRow {
   scoring_format: 'points' | 'betting';
   allowed_bet_types: string[];
   status: 'active' | 'finished';
+  competition_bets_deadline: string | null;
   created_at: string;
 }
 
@@ -56,6 +57,7 @@ export async function insertGroup(
     commissioner_id: string;
     scoring_format: string;
     allowed_bet_types: string[];
+    competition_bets_deadline?: string | null;
   },
   trx?: Knex.Transaction
 ): Promise<GroupRow> {
@@ -66,7 +68,24 @@ export async function insertGroup(
       commissioner_id: data.commissioner_id,
       scoring_format: data.scoring_format,
       allowed_bet_types: data.allowed_bet_types,
+      competition_bets_deadline: data.competition_bets_deadline || null,
     })
+    .returning('*');
+  return row;
+}
+
+export async function updateGroup(
+  groupId: string,
+  data: Partial<{
+    competition_bets_deadline: string | null;
+    allowed_bet_types: string[];
+  }>,
+  trx?: Knex.Transaction
+): Promise<GroupRow> {
+  const conn = trx || getDb();
+  const [row] = await conn('groups')
+    .where('id', groupId)
+    .update(data)
     .returning('*');
   return row;
 }

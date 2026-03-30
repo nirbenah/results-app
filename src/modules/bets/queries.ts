@@ -83,6 +83,8 @@ export interface MarketRow {
   match_id: string | null;
   competition_id: string | null;
   type: string;
+  subtype: string | null;
+  question: string | null;
   status: string;
   closes_at: string | null;
   settled_at: string | null;
@@ -278,6 +280,8 @@ export interface BetWithDetails {
   market_option_odds: number | null;
   market_id: string;
   market_type: string;
+  market_subtype: string | null;
+  market_question: string | null;
   market_status: string;
   home_team: string | null;
   away_team: string | null;
@@ -309,6 +313,8 @@ export async function findBetsByUserAndGroup(
       'market_options.odds as market_option_odds',
       'markets.id as market_id',
       'markets.type as market_type',
+      'markets.subtype as market_subtype',
+      'markets.question as market_question',
       'markets.status as market_status',
       'matches.home_team',
       'matches.away_team',
@@ -338,6 +344,12 @@ export async function findGroupById(
   groupId: string
 ): Promise<{ id: string; scoring_format: string; status: string; allowed_bet_types: string[] } | undefined> {
   return getDb()('groups').where('id', groupId).select('id', 'scoring_format', 'status', 'allowed_bet_types').first();
+}
+
+export async function findFullGroupById(
+  groupId: string
+): Promise<{ id: string; scoring_format: string; status: string; allowed_bet_types: string[]; competition_bets_deadline: string | null } | undefined> {
+  return getDb()('groups').where('id', groupId).select('id', 'scoring_format', 'status', 'allowed_bet_types', 'competition_bets_deadline').first();
 }
 
 /**
