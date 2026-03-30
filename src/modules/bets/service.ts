@@ -46,10 +46,27 @@ export async function placeBet(params: PlaceBetParams): Promise<PlaceBetResult> 
   // Check for existing bet on same option
   const existingBet = await queries.findExistingBet(userId, groupId, marketOptionId);
   if (existingBet) {
-    // If score prediction changed, update it
+    const db = getDb();
+
+    // If voided (user switched away then back), reactivate it
+    if (existingBet.status === 'void') {
+      // First void any OTHER pending bet on the same market
+      const option = await queries.findMarketOptionById(marketOptionId);
+      if (option) {
+        const otherPending = await queries.findExistingBetOnMarket(userId, groupId, option.market_id);
+        if (otherPending) {
+          await db('bets').where('id', otherPending.id).update({ status: 'void', settled_at: db.fn.now() });
+        }
+      }
+      await db('bets').where('id', existingBet.id).update({ status: 'pending', settled_at: null });
+      existingBet.status = 'pending';
+      existingBet.settled_at = null;
+      return { bet: existingBet, marketOption: option!, isExisting: true };
+    }
+
+    // If pending and score prediction changed, update it
     if (predictedHomeScore != null && predictedAwayScore != null &&
         (existingBet.predicted_home_score !== predictedHomeScore || existingBet.predicted_away_score !== predictedAwayScore)) {
-      const db = getDb();
       await db('bets').where('id', existingBet.id).update({
         predicted_home_score: predictedHomeScore,
         predicted_away_score: predictedAwayScore,
