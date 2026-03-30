@@ -869,11 +869,12 @@ function updateWalletNavVisibility() {
 
 async function refreshActiveGroupData() {
   if (!state.activeGroupId) return;
-  await Promise.all([
-    loadGroupDetails(),
-    loadWallet(),
-    loadMatches(),
-  ]);
+  var tasks = [loadGroupDetails(), loadWallet(), loadMatches()];
+  // Also refresh the current screen's data
+  var screen = state.currentScreen;
+  if (screen === 'bets') tasks.push(loadBets());
+  if (screen === 'leaderboard') tasks.push(loadLeaderboard());
+  await Promise.all(tasks);
 }
 
 function updateNoGroupNotice() {
