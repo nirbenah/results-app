@@ -1252,55 +1252,59 @@ async function loadMatches() {
   // Bind competition bet buttons + load existing bets to highlight selections
   var compBetBtns = container.querySelectorAll('[data-action="place-comp-bet"]');
   if (compBetBtns.length > 0) {
-    // Load existing bets to highlight selections
-    var betsByOption = {};
+    // Load existing bets to highlight selections — track by MARKET not option
+    var compBetsByMarket = {}; // marketId → { optionId, betId }
     try {
       var betsData = await api('GET', '/v1/bets?group_id=' + state.activeGroupId);
       betsData.bets.forEach(function(b) {
-        if (b.status === 'pending' && b.market_option && b.market_option.id) betsByOption[b.market_option.id] = b;
+        if (b.status === 'pending' && b.market_option && b.market && b.market.id) {
+          compBetsByMarket[b.market.id] = { optionId: b.market_option.id, betId: b.id };
+        }
       });
     } catch (e) { /* ignore */ }
 
     compBetBtns.forEach(function(btn) {
       var optId = btn.dataset.option;
-      if (betsByOption[optId]) btn.classList.add('selected');
+      var mktId = btn.dataset.market;
+      // Highlight if this option is the current selection for this market
+      if (compBetsByMarket[mktId] && compBetsByMarket[mktId].optionId === optId) {
+        btn.classList.add('selected');
+      }
 
       btn.addEventListener('click', async function() {
         var optionId = this.dataset.option;
         var marketId = this.dataset.market;
         var label = this.dataset.label;
+        var clickedBtn = this;
 
-        // Mutual exclusion within same market
+        // Siblings in same market
         var siblings = container.querySelectorAll('[data-action="place-comp-bet"][data-market="' + marketId + '"]');
 
-        // If already selected, cancel the bet
-        if (this.classList.contains('selected')) {
-          // Find the bet to cancel
-          if (betsByOption[optionId]) {
+        // If this option is already selected → cancel
+        if (clickedBtn.classList.contains('selected')) {
+          var existing = compBetsByMarket[marketId];
+          if (existing && existing.betId) {
             try {
-              await api('DELETE', '/v1/bets/' + betsByOption[optionId].id);
-              delete betsByOption[optionId];
-              this.classList.remove('selected');
+              await api('DELETE', '/v1/bets/' + existing.betId);
+              delete compBetsByMarket[marketId];
+              clickedBtn.classList.remove('selected');
               log('Bet cancelled', 'success');
             } catch (e) { alert('Cancel error: ' + e.message); }
           }
           return;
         }
 
+        // Place new bet (backend auto-voids the old one if switching options)
         try {
           var result = await api('POST', '/v1/bets', {
             group_id: state.activeGroupId,
             market_option_id: optionId,
           });
-          // Remove selection from siblings
-          siblings.forEach(function(s) {
-            if (betsByOption[s.dataset.option]) {
-              delete betsByOption[s.dataset.option];
-            }
-            s.classList.remove('selected');
-          });
-          betsByOption[optionId] = result;
-          this.classList.add('selected');
+          // Clear all siblings visually
+          siblings.forEach(function(s) { s.classList.remove('selected'); });
+          // Track new bet
+          compBetsByMarket[marketId] = { optionId: optionId, betId: result.id };
+          clickedBtn.classList.add('selected');
           log('Bet placed: ' + label, 'success');
         } catch (e) { alert('Bet error: ' + (e.message || e)); }
       });
